@@ -302,12 +302,40 @@ body.bg-custom-image::after {
 }
 
 .status-line {
-  margin: 18px 2px 22px;
+  margin: 0;
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 12.5px;
   letter-spacing: 0.02em;
   min-height: 16px;
+}
+
+.content-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 18px 2px 22px;
+}
+
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.sort-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sort-select {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 /* ==========================================================================
@@ -575,6 +603,18 @@ body.bg-custom-image::after {
 .card-actions:has(.card-favorite-btn[aria-pressed="true"]) {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* Favorited shortcuts: only the Favorite button stays visible/usable in
+   this row — drag-reorder, edit, and delete are hidden. Keyed off the
+   existing aria-pressed state on .card-favorite-btn (already set from
+   shortcut.favorite in buildCard()), so there's no separate favorite
+   state to keep in sync. Non-favorite cards are unaffected — their
+   .card-actions row doesn't match this :has() condition, so they keep
+   the exact hover behavior above. */
+.card-actions:has(.card-favorite-btn[aria-pressed="true"]) .card-drag-handle,
+.card-actions:has(.card-favorite-btn[aria-pressed="true"]) .card-action-btn {
+  display: none;
 }
 
 .card-action-btn {
@@ -1372,6 +1412,17 @@ body.hide-domain .card-domain {
 
 .card-drag-handle:active {
   cursor: grabbing;
+}
+
+.card-drag-handle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.card-drag-handle:disabled:hover {
+  background: var(--bg);
+  color: var(--text-muted);
+  border-color: var(--border);
 }
 
 .shortcut-card.dragging {

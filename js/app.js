@@ -1,14 +1,29 @@
 /* ==========================================================================
-   Shortcut Dashboard — app.js (V2)
-   Vanilla JS, no dependencies. Everything is stored in localStorage.
+   Shortcut Dashboard — app.js (V2 data model, V3 storage)
+   Vanilla JS, no framework. Persisted state lives in chrome.storage.local
+   as of V3.0 Task 2 — previously (V2.x, and the V3.0 Task 1 extension
+   foundation) it lived in localStorage. A one-time migration copies any
+   existing V2.2 localStorage data over the first time this runs.
+
+   As of V3.0 Task 4, all data validation/sanitization and
+   chrome.storage.local persistence (including that migration) lives in
+   js/shared/store.js, and theme/background application logic lives in
+   js/shared/appearance.js — both are plain ES modules imported below and
+   shared unchanged with the Options page (options/options.js), so the
+   dashboard and Options page can never drift out of sync on how a
+   setting is validated or applied. This file (loaded as
+   <script type="module">) owns everything specific to the dashboard's
+   own DOM: the shortcut grid, sidebar, modals, drag-and-drop, and wiring
+   the shared logic above to this page's specific controls.
 
    V2 adds categories, favorites, custom icons, and improved search on top
    of the V1.1 foundation. The V1.1 URL validation/normalization, storage
    self-healing, modal focus-trap, toast, and event-delegation patterns are
    preserved unchanged — V2 extends them rather than replacing them.
 
-   State shape (single source of truth, held in memory and mirrored to one
-   localStorage key):
+   State shape (single source of truth — held in memory as `state` and
+   mirrored to chrome.storage.local; unchanged from V2.2, only *where*
+   it's stored, and *what validates/persists it*, has changed):
 
    {
      version: 2,
@@ -24,19 +39,26 @@
    }
    ========================================================================== */
 
-(function () {
-  "use strict";
+import {
+  MAX_NAME_LENGTH,
+  MAX_CATEGORY_NAME_LENGTH,
+  MAX_EMOJI_LENGTH,
+  STORAGE_KEY_V2,
+  defaultSettings,
+  generateId,
+  normalizeAndValidateUrl,
+  comparableUrlKey,
+  getDomain,
+  getFaviconUrl,
+  sanitizeState,
+  loadState,
+  persistState,
+  mergeStates,
+  parseImportedBackup,
+} from "./shared/store.js";
+import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appearance.js";
 
-  // ------------------------------------------------------------------------
-  // Constants
-  // ------------------------------------------------------------------------
-  const STORAGE_KEY_V1 = "shortcutDashboard.shortcuts.v1"; // legacy V1.1 key (read-only, never written)
-  const STORAGE_KEY_V2 = "shortcutDashboardState";
-  const MAX_NAME_LENGTH = 60;
-  const MAX_CATEGORY_NAME_LENGTH = 40;
-  const MAX_EMOJI_LENGTH = 16;
-  const ALLOWED_PROTOCOLS = ["http:", "https:"];
-  const ICON_TYPES = ["favicon", "image", "emoji", "letter"];
+{
 
   // ------------------------------------------------------------------------
   // DOM references
@@ -47,6 +69,7 @@
   const noResultsTitle = document.getElementById("noResultsTitle");
   const noResultsCopy = document.getElementById("noResultsCopy");
   const statusLine = document.getElementById("statusLine");
+  const sortSelect = document.getElementById("sortSelect");
   const searchWrap = document.getElementById("searchWrap");
   const searchInput = document.getElementById("searchInput");
   const toast = document.getElementById("toast");
@@ -150,6 +173,7 @@
   let state = { version: 2, settings: defaultSettings(), categories: [], shortcuts: [] };
   let currentView = { type: "all", categoryId: null }; // "all" | "favorites" | "uncategorized" | "category"
   let searchTerm = "";          // current search filter (lowercased, trimmed, whitespace-collapsed)
+  let sortOrder = "manual";     // "manual" | "az" | "za" — display-only, never persisted (see render())
   let pendingDeleteId = null;   // shortcut id awaiting delete confirmation
   let pendingCategoryDeleteId = null;
   let toastTimer = null;
@@ -166,7 +190,6 @@
   // V2.2 additions
   let clockIntervalId = null;         // single managed interval for the header clock, or null when stopped
   let systemThemeQuery = null;        // matchMedia("(prefers-color-scheme: light)"), created once in init()
-  let bgImageLoadToken = 0;           // increments per background-image load attempt so a stale async result is ignored
 
   // Runtime-only: true when the currently *saved* background image failed
   // to load, so the page is visually showing the Default background as a
@@ -179,452 +202,11 @@
   // Settings later (e.g. after a failure at page load).
   let backgroundImageLoadFailed = false;
 
-  const THEME_MODES = ["dark", "light", "system"];
-  const GRID_SIZES = ["small", "medium", "large"];
-  const BACKGROUND_TYPES = ["default", "color", "gradient", "image"];
-  const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
-
-  function defaultSettings() {
-    return {
-      theme: "dark",
-      gridSize: "medium",
-      showSearch: true,
-      showDomain: true,
-      showClock: false,
-      background: {
-        type: "default",
-        color: "#141822",
-        gradientFrom: "#1b2030",
-        gradientTo: "#0b0d12",
-        imageUrl: "",
-      },
-    };
-  }
-
-  // ==========================================================================
-  // URL helpers (unchanged from V1.1)
-  // ==========================================================================
-
-  /**
-   * Parses free-form user input into a URL object.
-   * - Adds "https://" when no protocol was given ("github.com" -> https://github.com/).
-   * - Delegates everything else to the native URL parser. Note that the
-   *   parser does its own normalization here (see comparableUrlKey below for
-   *   what that means for comparisons) — it is not a passthrough of the raw
-   *   input.
-   * Returns null if the input can't be parsed into a URL at all.
-   */
-  function parseUserUrl(input) {
-    if (typeof input !== "string") return null;
-    let value = input.trim();
-    if (!value) return null;
-
-    // Only treat it as "already has a protocol" if it looks like a real
-    // scheme (letters, digits, +, -, .) followed by "://". Otherwise prefix
-    // https:// — this also means something like "javascript:alert(1)" gets
-    // turned into "https://javascript:alert(1)" rather than accepted as-is
-    // (it has a colon but no "//"). That reinterpreted string is then still
-    // subject to the protocol/hostname checks below, and in practice fails
-    // to parse as a valid URL at all — see isAllowedUrl().
-    if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value)) {
-      value = `https://${value}`;
-    }
-
-    try {
-      return new URL(value);
-    } catch (err) {
-      return null;
-    }
-  }
-
-  /**
-   * Validates that a parsed URL is a normal, safe web address.
-   * - Protocol must be http: or https: (rejects javascript:, data:, file:,
-   *   ftp:, and anything else).
-   * - Hostname must simply be present (see V1.1 note: intentionally allows
-   *   single-label LAN/intranet hosts like "router" or "nas").
-   */
-  function isAllowedUrl(parsed) {
-    if (!parsed) return false;
-    if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) return false;
-    return Boolean(parsed.hostname);
-  }
-
-  /**
-   * Normalizes and validates raw user input in one step. Returns the
-   * normalized, storable URL string (parsed.href), or null if the input is
-   * not an acceptable URL. Used for both shortcut URLs and custom icon
-   * image URLs — the acceptance rules (http/https, real hostname) are the
-   * same for both.
-   */
-  function normalizeAndValidateUrl(input) {
-    const parsed = parseUserUrl(input);
-    if (!isAllowedUrl(parsed)) return null;
-    return parsed.href;
-  }
-
-  /**
-   * Key used to compare two already-normalized URLs for "is this the same
-   * shortcut" purposes.
-   *
-   * Only the protocol and host are lowercased for comparison: per the URL
-   * spec, scheme names and hostnames are not case-sensitive, so
-   * "HTTPS://Example.com" and "https://example.com" are the same origin.
-   * Pathname, query string, and fragment are deliberately preserved
-   * exactly as-is — servers are free to treat those as case-sensitive
-   * (e.g. "/Page" and "/page" can be two entirely different resources),
-   * so lowercasing them could silently merge two distinct shortcuts into
-   * one "duplicate". A full `url.toLowerCase()` would do exactly that.
-   */
-  function comparableUrlKey(url) {
-    try {
-      const parsed = new URL(url);
-      return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${parsed.pathname}${parsed.search}${parsed.hash}`;
-    } catch (err) {
-      // Not a parseable URL — shouldn't happen for values that already went
-      // through normalizeAndValidateUrl(), but fall back to the raw string
-      // so duplicate detection degrades gracefully instead of throwing.
-      return url;
-    }
-  }
-
-  function getDomain(url) {
-    try {
-      return new URL(url).hostname.replace(/^www\./, "");
-    } catch (err) {
-      return url;
-    }
-  }
-
-  function getFaviconUrl(url) {
-    try {
-      const domain = getDomain(url);
-      if (!domain) return null;
-      return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  // ==========================================================================
-  // Data validation
-  // ==========================================================================
-
-  function isNonEmptyString(value) {
-    return typeof value === "string" && value.trim().length > 0;
-  }
-
-  function isFiniteNumber(value) {
-    return typeof value === "number" && Number.isFinite(value);
-  }
-
-  /**
-   * Validates a single category record. Returns a clean category object, or
-   * null if unusable (missing/blank name). A missing/invalid id does not by
-   * itself disqualify the record — loadState() assigns a fresh id.
-   */
-  function sanitizeCategory(raw) {
-    if (!raw || typeof raw !== "object") return null;
-    if (!isNonEmptyString(raw.name)) return null;
-    return {
-      id: isNonEmptyString(raw.id) ? String(raw.id) : null,
-      name: raw.name.trim().slice(0, MAX_CATEGORY_NAME_LENGTH),
-      icon: isNonEmptyString(raw.icon) ? String(raw.icon).trim().slice(0, 8) : "📁",
-      position: isFiniteNumber(raw.position) ? raw.position : 0,
-    };
-  }
-
-  /**
-   * Validates a single icon record. Always returns a usable icon object —
-   * falls back to automatic favicon rather than rejecting the whole
-   * shortcut, since a bad icon shouldn't destroy an otherwise-valid record.
-   */
-  function sanitizeIcon(raw) {
-    const fallback = { type: "favicon", value: "" };
-    if (!raw || typeof raw !== "object") return fallback;
-    const type = ICON_TYPES.includes(raw.type) ? raw.type : "favicon";
-    const rawValue = isNonEmptyString(raw.value) ? String(raw.value).trim() : "";
-
-    if (type === "image") {
-      const validated = normalizeAndValidateUrl(rawValue);
-      return validated ? { type: "image", value: validated } : fallback;
-    }
-    if (type === "emoji") {
-      return rawValue ? { type: "emoji", value: rawValue.slice(0, MAX_EMOJI_LENGTH) } : fallback;
-    }
-    if (type === "letter") {
-      return { type: "letter", value: "" };
-    }
-    return fallback;
-  }
-
-  /**
-   * Validates and normalizes a single V2 shortcut record loaded from
-   * storage. Returns a clean shortcut object, or null if the record is
-   * unusable (missing/blank name, invalid URL, wrong shape). Malformed
-   * records are skipped rather than allowed to break the app.
-   *
-   * `validCategoryIds` lets an orphaned category reference (e.g. the
-   * category was deleted by hand-editing storage) degrade to "no category"
-   * instead of invalidating the whole shortcut.
-   */
-  function sanitizeShortcut(raw, validCategoryIds) {
-    if (!raw || typeof raw !== "object") return null;
-    if (!isNonEmptyString(raw.name)) return null;
-    if (!isNonEmptyString(raw.url)) return null;
-
-    const url = normalizeAndValidateUrl(raw.url);
-    if (!url) return null;
-
-    const createdAt = isFiniteNumber(raw.createdAt) ? raw.createdAt : Date.now();
-
-    return {
-      id: isNonEmptyString(raw.id) ? String(raw.id) : null,
-      name: raw.name.trim().slice(0, MAX_NAME_LENGTH),
-      url,
-      icon: sanitizeIcon(raw.icon),
-      categoryId:
-        isNonEmptyString(raw.categoryId) && validCategoryIds.has(raw.categoryId)
-          ? raw.categoryId
-          : null,
-      favorite: raw.favorite === true,
-      position: isFiniteNumber(raw.position) ? raw.position : 0,
-      createdAt,
-      updatedAt: isFiniteNumber(raw.updatedAt) ? raw.updatedAt : createdAt,
-    };
-  }
-
-  /**
-   * Validates a legacy V1.1 record using the same rules V1.1 itself used
-   * (name/url/id/createdAt only — no V2 fields exist yet at this point).
-   */
-  function sanitizeV1Record(raw) {
-    if (!raw || typeof raw !== "object") return null;
-    if (!isNonEmptyString(raw.name)) return null;
-    if (!isNonEmptyString(raw.url)) return null;
-
-    const url = normalizeAndValidateUrl(raw.url);
-    if (!url) return null;
-
-    return {
-      id: isNonEmptyString(raw.id) ? String(raw.id) : null,
-      name: raw.name.trim().slice(0, MAX_NAME_LENGTH),
-      url,
-      createdAt: isFiniteNumber(raw.createdAt) ? raw.createdAt : Date.now(),
-    };
-  }
-
-  function isValidHexColor(value) {
-    return typeof value === "string" && HEX_COLOR_RE.test(value.trim());
-  }
-
-  /**
-   * Validates the background sub-object. Each field falls back to its own
-   * default independently — an invalid gradient color, for instance, never
-   * discards a perfectly valid imageUrl the user also has stored, since
-   * only one of these fields is ever "active" (per `type`) at a time.
-   */
-  function sanitizeBackground(raw) {
-    const defaults = defaultSettings().background;
-    if (!raw || typeof raw !== "object") return defaults;
-    return {
-      type: BACKGROUND_TYPES.includes(raw.type) ? raw.type : defaults.type,
-      color: isValidHexColor(raw.color) ? raw.color.trim() : defaults.color,
-      gradientFrom: isValidHexColor(raw.gradientFrom) ? raw.gradientFrom.trim() : defaults.gradientFrom,
-      gradientTo: isValidHexColor(raw.gradientTo) ? raw.gradientTo.trim() : defaults.gradientTo,
-      imageUrl: isNonEmptyString(raw.imageUrl) ? (normalizeAndValidateUrl(raw.imageUrl) || "") : "",
-    };
-  }
-
-  function sanitizeSettings(raw) {
-    const defaults = defaultSettings();
-    if (!raw || typeof raw !== "object") return defaults;
-    return {
-      theme: THEME_MODES.includes(raw.theme) ? raw.theme : defaults.theme,
-      gridSize: GRID_SIZES.includes(raw.gridSize) ? raw.gridSize : defaults.gridSize,
-      showSearch: typeof raw.showSearch === "boolean" ? raw.showSearch : defaults.showSearch,
-      showDomain: typeof raw.showDomain === "boolean" ? raw.showDomain : defaults.showDomain,
-      showClock: typeof raw.showClock === "boolean" ? raw.showClock : defaults.showClock,
-      background: sanitizeBackground(raw.background),
-    };
-  }
-
-  // ==========================================================================
-  // Migration: V1.1 -> V2
-  // ==========================================================================
-
-  /**
-   * Reads the legacy V1.1 shortcut list (if any) and converts it into V2
-   * shortcut records. Never writes to or clears the V1.1 key — the old data
-   * is left in place untouched, so a failed or partial migration can never
-   * destroy it. Applies the same validation V1.1 used, so nothing that was
-   * previously considered valid gets dropped.
-   */
-  function migrateV1Shortcuts() {
-    let raw;
-    try {
-      raw = localStorage.getItem(STORAGE_KEY_V1);
-    } catch (err) {
-      console.error("localStorage is unavailable during migration:", err);
-      return [];
-    }
-    if (!raw) return [];
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      console.error("Legacy V1.1 data was corrupted JSON; skipping migration for it.", err);
-      return [];
-    }
-    if (!Array.isArray(parsed)) return [];
-
-    const seenIds = new Set();
-    const seenUrls = new Set();
-    const result = [];
-    let position = 0;
-
-    for (const item of parsed) {
-      const record = sanitizeV1Record(item);
-      if (!record) continue; // malformed V1.1 entry — nothing valid to preserve
-
-      if (!record.id || seenIds.has(record.id)) {
-        record.id = generateId();
-      }
-      const urlKey = comparableUrlKey(record.url);
-      if (seenUrls.has(urlKey)) continue; // duplicate URL — first one wins, same as V1.1
-
-      seenIds.add(record.id);
-      seenUrls.add(urlKey);
-
-      result.push({
-        id: record.id,
-        name: record.name,
-        url: record.url,
-        icon: { type: "favicon", value: "" },
-        categoryId: null,
-        favorite: false,
-        position: position++,
-        createdAt: record.createdAt,
-        updatedAt: record.createdAt,
-      });
-    }
-
-    return result;
-  }
-
-  // ==========================================================================
-  // Storage layer
-  // ==========================================================================
-
-  /**
-   * Validates a full parsed V2 state object. Drops malformed categories and
-   * shortcuts individually rather than discarding the whole state — a
-   * single corrupted record must never take the rest of a person's data
-   * down with it. Returns a clean state object (never null — an
-   * unparseable/non-object payload just yields an empty-but-valid state).
-   */
-  function sanitizeState(parsed) {
-    const isObject = parsed && typeof parsed === "object" && !Array.isArray(parsed);
-    const rawCategories = isObject && Array.isArray(parsed.categories) ? parsed.categories : [];
-    const rawShortcuts = isObject && Array.isArray(parsed.shortcuts) ? parsed.shortcuts : [];
-    const settings = sanitizeSettings(isObject ? parsed.settings : null);
-
-    const seenCategoryIds = new Set();
-    const categories = [];
-    for (const item of rawCategories) {
-      const cat = sanitizeCategory(item);
-      if (!cat) continue;
-      if (!cat.id || seenCategoryIds.has(cat.id)) cat.id = generateId();
-      seenCategoryIds.add(cat.id);
-      categories.push(cat);
-    }
-
-    const validCategoryIds = new Set(categories.map((c) => c.id));
-    const seenShortcutIds = new Set();
-    const seenUrls = new Set();
-    const shortcuts = [];
-    for (const item of rawShortcuts) {
-      const sc = sanitizeShortcut(item, validCategoryIds);
-      if (!sc) continue;
-      if (!sc.id || seenShortcutIds.has(sc.id)) sc.id = generateId();
-      const urlKey = comparableUrlKey(sc.url);
-      if (seenUrls.has(urlKey)) continue;
-      seenShortcutIds.add(sc.id);
-      seenUrls.add(urlKey);
-      shortcuts.push(sc);
-    }
-
-    return { version: 2, settings, categories, shortcuts };
-  }
-
-  /**
-   * Loads the V2 state. If no V2 state exists yet, migrates from V1.1
-   * (producing an empty-but-valid state if there was nothing to migrate).
-   * Malformed stored data is self-healing: whenever the cleaned state
-   * differs from what was on disk, the cleaned version is written back so
-   * the same corruption doesn't resurface on the next load — mirroring the
-   * V1.1 loadShortcuts() behavior.
-   */
-  function loadState() {
-    let raw;
-    try {
-      raw = localStorage.getItem(STORAGE_KEY_V2);
-    } catch (err) {
-      console.error("localStorage is unavailable:", err);
-      return { version: 2, settings: defaultSettings(), categories: [], shortcuts: migrateV1Shortcuts() };
-    }
-
-    if (!raw) {
-      // First run on V2, or V2 key was cleared. Migrate whatever V1.1 data
-      // exists (if any) and persist the result as the new V2 state.
-      const migrated = { version: 2, settings: defaultSettings(), categories: [], shortcuts: migrateV1Shortcuts() };
-      persistState(migrated);
-      return migrated;
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      console.error("Stored V2 state was corrupted JSON; resetting.", err);
-      const fallback = { version: 2, settings: defaultSettings(), categories: [], shortcuts: [] };
-      persistState(fallback, { silent: true });
-      return fallback;
-    }
-
-    const clean = sanitizeState(parsed);
-    const cleanJson = JSON.stringify(clean);
-    if (cleanJson !== JSON.stringify(parsed)) {
-      persistState(clean, { silent: true });
-    }
-    return clean;
-  }
-
-  /**
-   * Persists the given state to localStorage. Never throws — storage
-   * failures (quota exceeded, disabled storage, private-mode restrictions,
-   * etc.) are caught and logged, and the function returns false instead so
-   * callers can show an accurate message rather than falsely claiming the
-   * change was saved.
-   */
-  function persistState(nextState) {
-    try {
-      localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(nextState));
-      return true;
-    } catch (err) {
-      console.error("Failed to save state:", err);
-      return false;
-    }
-  }
-
-  function generateId() {
-    if (window.crypto && typeof window.crypto.randomUUID === "function") {
-      return window.crypto.randomUUID();
-    }
-    // Fallback for older browsers: timestamp + random suffix.
-    return `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  }
+  // defaultSettings, generateId, URL validation/normalization, data
+  // sanitization, migration, and the chrome.storage.local storage layer
+  // all now live in js/shared/store.js (imported above) as of V3.0 Task 4
+  // — shared unchanged with the Options page. Nothing dashboard-specific
+  // was here; this comment just marks where that code used to live.
 
   // ==========================================================================
   // V2.2 — Appearance / display / background application
@@ -638,15 +220,12 @@
 
   /**
    * Resolves "system" against the browser's current color-scheme
-   * preference. "dark"/"light" pass through unchanged.
+   * preference and applies it — resolveEffectiveTheme() itself is the
+   * shared version imported from js/shared/appearance.js, so this can
+   * never disagree with how the Options page resolves the same setting.
    */
-  function resolveEffectiveTheme(theme) {
-    if (theme !== "system") return theme;
-    return systemThemeQuery && systemThemeQuery.matches ? "light" : "dark";
-  }
-
   function applyTheme() {
-    const effective = resolveEffectiveTheme(state.settings.theme);
+    const effective = resolveEffectiveTheme(state.settings.theme, Boolean(systemThemeQuery && systemThemeQuery.matches));
     document.documentElement.setAttribute("data-theme", effective);
   }
 
@@ -707,10 +286,6 @@
   // Background
   // --------------------------------------------------------------------
 
-  function clearBackgroundClasses() {
-    document.body.classList.remove("bg-custom-color", "bg-custom-gradient", "bg-custom-image");
-  }
-
   /** Syncs the Settings > Background error message to backgroundImageLoadFailed. */
   function updateBackgroundImageErrorUI() {
     if (backgroundImageLoadFailed) {
@@ -721,85 +296,27 @@
     }
   }
 
-  /**
-   * Applies state.settings.background. Image loading is validated with a
-   * throwaway Image() before it's ever committed to the page background —
-   * a broken/unreachable URL falls back to the Default background (and
-   * shows a toast) instead of leaving a broken-looking page.
-   *
-   * Failure is tracked only in the runtime `backgroundImageLoadFailed`
-   * flag, never in state.settings — the user's configured type and
-   * imageUrl are left exactly as saved, so a temporary network hiccup (or
-   * a URL that's simply offline right now) can't silently overwrite or
-   * discard their setting. bgImageLoadToken guards against a slow, now-
-   * stale load resolving after the user has since switched to a
-   * different URL/type — every new attempt bumps the token and
-   * optimistically clears the previous failure state immediately, so a
-   * fresh attempt is never left showing a stale error from the last one.
-   */
+  // The actual "what CSS does this background setting produce, and how is
+  // an image URL validated/raced" logic is shared with the Options page —
+  // see js/shared/appearance.js. This page only owns what happens to its
+  // own UI (the runtime failure flag + Settings panel error text + toast)
+  // when that shared logic reports success or failure.
+  const backgroundApplier = createBackgroundApplier({
+    docEl: document.documentElement,
+    bodyEl: document.body,
+    onImageSettled: () => {
+      backgroundImageLoadFailed = false;
+      updateBackgroundImageErrorUI();
+    },
+    onImageError: () => {
+      backgroundImageLoadFailed = true;
+      updateBackgroundImageErrorUI();
+      showToast("Background image couldn't be loaded — using the default background.", "error");
+    },
+  });
+
   function applyBackground() {
-    const bg = state.settings.background;
-    clearBackgroundClasses();
-    bgImageLoadToken++;
-
-    if (bg.type === "color") {
-      backgroundImageLoadFailed = false;
-      updateBackgroundImageErrorUI();
-      document.documentElement.style.setProperty("--bg-override-color", bg.color);
-      document.body.classList.add("bg-custom-color");
-      return;
-    }
-
-    if (bg.type === "gradient") {
-      backgroundImageLoadFailed = false;
-      updateBackgroundImageErrorUI();
-      document.documentElement.style.setProperty(
-        "--bg-override-gradient",
-        `linear-gradient(135deg, ${bg.gradientFrom}, ${bg.gradientTo})`
-      );
-      document.body.classList.add("bg-custom-gradient");
-      return;
-    }
-
-    if (bg.type === "image") {
-      if (!bg.imageUrl) {
-        // No URL saved yet — behave as Default until one is entered. This
-        // isn't a load failure (nothing was attempted), so clear any
-        // leftover failure state from a previously-configured URL.
-        backgroundImageLoadFailed = false;
-        updateBackgroundImageErrorUI();
-        return;
-      }
-
-      // Starting a fresh attempt: clear the previous failure state right
-      // away (per-requirement — changing the URL/type clears it) rather
-      // than waiting for this attempt to resolve.
-      backgroundImageLoadFailed = false;
-      updateBackgroundImageErrorUI();
-
-      const token = bgImageLoadToken;
-      const preload = new Image();
-      preload.onload = () => {
-        if (token !== bgImageLoadToken) return; // superseded by a newer settings change
-        document.documentElement.style.setProperty("--bg-override-image", `url("${bg.imageUrl}")`);
-        document.body.classList.add("bg-custom-image");
-      };
-      preload.onerror = () => {
-        if (token !== bgImageLoadToken) return;
-        clearBackgroundClasses(); // fall back to the Default background — state.settings is untouched
-        backgroundImageLoadFailed = true;
-        updateBackgroundImageErrorUI();
-        showToast("Background image couldn't be loaded — using the default background.", "error");
-      };
-      preload.src = bg.imageUrl;
-      return;
-    }
-
-    // type === "default" — classes already cleared above. Not an image
-    // load outcome, so any stale failure state from a previous "image"
-    // configuration no longer applies.
-    backgroundImageLoadFailed = false;
-    updateBackgroundImageErrorUI();
+    backgroundApplier.apply(state.settings.background);
   }
 
   function applyAllAppearance() {
@@ -868,16 +385,38 @@
     return state.shortcuts;
   }
 
+  /** True if a single shortcut matches the given (already-normalized) search term. Matches title, URL, domain, and category name. */
+  function shortcutMatchesSearch(sc, term) {
+    if (!term) return true;
+    const category = getCategoryById(sc.categoryId);
+    const haystack = normalizeSearchText(`${sc.name} ${sc.url} ${getDomain(sc.url)} ${category ? category.name : ""}`);
+    return haystack.includes(term);
+  }
+
   function getFilteredShortcuts() {
     const inView = getShortcutsInView();
     if (!searchTerm) return inView;
-    return inView.filter((sc) => {
-      const category = getCategoryById(sc.categoryId);
-      const haystack = normalizeSearchText(
-        `${sc.name} ${sc.url} ${getDomain(sc.url)} ${category ? category.name : ""}`
-      );
-      return haystack.includes(searchTerm);
-    });
+    return inView.filter((sc) => shortcutMatchesSearch(sc, searchTerm));
+  }
+
+  /**
+   * Orders an already-filtered list for display. This is purely a display
+   * operation — it returns a new array and never touches `sc.position` or
+   * writes to storage. "Manual" reflects the user's real, persisted
+   * drag-and-drop order (state.shortcuts[i].position); "az"/"za" are
+   * temporary alphabetical views that last only as long as `sortOrder` is
+   * set, and are discarded (silently reverting to Manual) on refresh —
+   * per Task 6, there is no "save this sort as the new manual order"
+   * action, to avoid ever silently destroying the user's real order.
+   */
+  function sortShortcuts(list) {
+    if (sortOrder === "az") {
+      return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    }
+    if (sortOrder === "za") {
+      return [...list].sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: "base" }));
+    }
+    return [...list].sort((a, b) => a.position - b.position); // manual
   }
 
   // ==========================================================================
@@ -916,9 +455,20 @@
     }
 
     const sorted = [...state.categories].sort((a, b) => a.position - b.position);
+
+    // While searching, a category with no matching shortcuts is hidden
+    // from the sidebar list — it isn't deleted, disabled, or modified in
+    // any way, and reappears the instant the search is cleared. Nothing
+    // about the currently selected filter (Favorites/Uncategorized/a
+    // specific category) affects this: it always reflects "would this
+    // category have results for the current search if I clicked it?".
+    const visibleCategories = searchTerm
+      ? sorted.filter((cat) => state.shortcuts.some((sc) => sc.categoryId === cat.id && shortcutMatchesSearch(sc, searchTerm)))
+      : sorted;
+
     const fragment = document.createDocumentFragment();
 
-    sorted.forEach((cat) => {
+    visibleCategories.forEach((cat) => {
       const li = document.createElement("li");
 
       const row = document.createElement("div");
@@ -1048,7 +598,7 @@
     noResultsState.hidden = true;
 
     const fragment = document.createDocumentFragment();
-    const ordered = [...filtered].sort((a, b) => a.position - b.position);
+    const ordered = sortShortcuts(filtered);
     ordered.forEach((sc, index) => {
       fragment.appendChild(buildCard(sc, index));
     });
@@ -1101,16 +651,29 @@
     // card, so a drag can only ever start here — clicking Favorite/Edit/
     // Delete never triggers one. It also doubles as the keyboard reorder
     // control: focus it, then Arrow Up/Down/Home/End.
+    //
+    // Disabled while a temporary alphabetical sort (A→Z/Z→A) is active:
+    // reordering relative to alphabetically-adjacent cards would silently
+    // renumber the *real* manual order to match whatever happened to be
+    // alphabetically next — exactly the kind of silent order corruption
+    // Task 6 requires avoiding. Switching Sort back to Manual re-enables
+    // it; nothing about the user's actual saved order changes in the
+    // meantime. handleGridDragStart()/handleGridHandleKeydown() enforce
+    // this too, as a second guard.
+    const reorderDisabled = sortOrder !== "manual";
     const dragHandle = document.createElement("button");
     dragHandle.type = "button";
     dragHandle.className = "card-drag-handle";
-    dragHandle.draggable = true;
+    dragHandle.draggable = !reorderDisabled;
+    dragHandle.disabled = reorderDisabled;
     dragHandle.dataset.action = "drag-handle";
     dragHandle.dataset.id = shortcut.id;
-    dragHandle.title = "Drag to reorder";
+    dragHandle.title = reorderDisabled ? "Switch Sort to Manual order to drag and reorder" : "Drag to reorder";
     dragHandle.setAttribute(
       "aria-label",
-      `Reorder ${shortcut.name}. Drag to move, or use Arrow Up, Arrow Down, Home, and End keys.`
+      reorderDisabled
+        ? `Reorder ${shortcut.name}. Switch Sort to Manual order to drag and reorder.`
+        : `Reorder ${shortcut.name}. Drag to move, or use Arrow Up, Arrow Down, Home, and End keys.`
     );
     dragHandle.textContent = "⠿";
     actions.appendChild(dragHandle);
@@ -1292,12 +855,12 @@
     shortcut.favorite = !shortcut.favorite;
     shortcut.updatedAt = Date.now();
 
-    const savedOk = persistState(state);
     render();
-
-    if (!savedOk) {
-      showToast("Favorite updated for this session, but it could not be saved permanently.", "error");
-    }
+    persistState(state).then((savedOk) => {
+      if (!savedOk) {
+        showToast("Favorite updated for this session, but it could not be saved permanently.", "error");
+      }
+    });
   }
 
   // ==========================================================================
@@ -1354,12 +917,12 @@
    * hardening and messaging.
    */
   function commitReorder() {
-    const savedOk = persistState(state);
     render();
-    if (!savedOk) {
-      showToast("Order changed for this session, but could not be saved permanently.", "error");
-    }
-    return savedOk;
+    persistState(state).then((savedOk) => {
+      if (!savedOk) {
+        showToast("Order changed for this session, but could not be saved permanently.", "error");
+      }
+    });
   }
 
   /**
@@ -1398,6 +961,10 @@
   }
 
   function handleGridDragStart(e) {
+    if (sortOrder !== "manual") {
+      e.preventDefault(); // belt-and-suspenders — the handle is also disabled while sorted
+      return;
+    }
     const handle = e.target.closest('[data-action="drag-handle"]');
     if (!handle) return; // draggable is only ever set on the handle itself
     const card = handle.closest(".shortcut-card");
@@ -1463,6 +1030,7 @@
   }
 
   function handleGridHandleKeydown(e) {
+    if (sortOrder !== "manual") return; // the handle is also disabled while sorted — belt-and-suspenders
     const handle = e.target.closest('[data-action="drag-handle"]');
     if (!handle) return;
     if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
@@ -1635,7 +1203,7 @@
     // If we're editing, confirm the shortcut still exists *before* doing
     // anything else — it could have been deleted (e.g. in another tab)
     // while this modal was open. In that case we must not modify anything,
-    // must not touch localStorage, and must not claim a successful update.
+    // must not touch storage, and must not claim a successful update.
     let target = null;
     if (id) {
       target = state.shortcuts.find((sc) => sc.id === id);
@@ -1722,22 +1290,22 @@
       });
     }
 
-    const savedOk = persistState(state);
-
     render();
     closeAddEditModal();
 
-    if (target) {
-      showToast(
-        savedOk ? "Shortcut updated." : "Your changes were made for this session, but could not be saved permanently.",
-        savedOk ? "success" : "error"
-      );
-    } else {
-      showToast(
-        savedOk ? "Shortcut added." : "Your shortcut was added, but it could not be saved permanently.",
-        savedOk ? "success" : "error"
-      );
-    }
+    persistState(state).then((savedOk) => {
+      if (target) {
+        showToast(
+          savedOk ? "Shortcut updated." : "Your changes were made for this session, but could not be saved permanently.",
+          savedOk ? "success" : "error"
+        );
+      } else {
+        showToast(
+          savedOk ? "Shortcut added." : "Your shortcut was added, but it could not be saved permanently.",
+          savedOk ? "success" : "error"
+        );
+      }
+    });
   }
 
   // ==========================================================================
@@ -1770,15 +1338,16 @@
     }
 
     state.shortcuts = state.shortcuts.filter((sc) => sc.id !== pendingDeleteId);
-    const savedOk = persistState(state);
 
     render();
     closeDeleteConfirm();
 
-    showToast(
-      savedOk ? "Shortcut deleted." : "Shortcut deleted for this session, but the change could not be saved permanently.",
-      savedOk ? "success" : "error"
-    );
+    persistState(state).then((savedOk) => {
+      showToast(
+        savedOk ? "Shortcut deleted." : "Shortcut deleted for this session, but the change could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   // ==========================================================================
@@ -1848,8 +1417,6 @@
       return;
     }
 
-    let savedOk;
-
     if (id) {
       const target = state.categories.find((c) => c.id === id);
       if (!target) {
@@ -1859,7 +1426,6 @@
       }
       target.name = trimmedName;
       target.icon = icon;
-      savedOk = persistState(state);
     } else {
       state.categories.push({
         id: generateId(),
@@ -1867,16 +1433,17 @@
         icon,
         position: state.categories.length,
       });
-      savedOk = persistState(state);
     }
 
     render();
     closeCategoryModal();
 
-    showToast(
-      savedOk ? "Category saved." : "Category saved for this session, but could not be saved permanently.",
-      savedOk ? "success" : "error"
-    );
+    persistState(state).then((savedOk) => {
+      showToast(
+        savedOk ? "Category saved." : "Category saved for this session, but could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   // ==========================================================================
@@ -1920,17 +1487,17 @@
       currentView = { type: "all", categoryId: null };
     }
 
-    const savedOk = persistState(state);
-
     render();
     closeCategoryDeleteConfirm();
 
-    showToast(
-      savedOk
-        ? "Category deleted. Its shortcuts are now uncategorized."
-        : "Category deleted for this session, but the change could not be saved permanently.",
-      savedOk ? "success" : "error"
-    );
+    persistState(state).then((savedOk) => {
+      showToast(
+        savedOk
+          ? "Category deleted. Its shortcuts are now uncategorized."
+          : "Category deleted for this session, but the change could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   // ==========================================================================
@@ -1945,17 +1512,18 @@
     shortcut.categoryId = categoryId || null;
     shortcut.updatedAt = Date.now();
 
-    const savedOk = persistState(state);
     render();
 
     const category = getCategoryById(categoryId);
     const label = category ? category.name : "Uncategorized";
-    showToast(
-      savedOk
-        ? `Moved to ${label}.`
-        : `Moved to ${label} for this session, but it could not be saved permanently.`,
-      savedOk ? "success" : "error"
-    );
+    persistState(state).then((savedOk) => {
+      showToast(
+        savedOk
+          ? `Moved to ${label}.`
+          : `Moved to ${label} for this session, but it could not be saved permanently.`,
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   // ==========================================================================
@@ -1982,8 +1550,25 @@
     return String(n).padStart(2, "0");
   }
 
-  function exportState() {
-    const json = JSON.stringify(state, null, 2);
+  /**
+   * Reads the current state from chrome.storage.local (the source of
+   * truth) and exports it as a backup JSON file. Falls back to the
+   * in-memory `state` if that read fails for any reason — export should
+   * never simply fail outright just because a fresh read hit an error,
+   * and the in-memory copy is always the last state the user actually saw
+   * on screen. Reuses the same imported loadState() the dashboard's own
+   * init() uses, so "current stored state" always means the same thing
+   * everywhere in this file.
+   */
+  async function exportState() {
+    let dataToExport = state;
+    try {
+      dataToExport = await loadState();
+    } catch (err) {
+      console.error("Could not read chrome.storage.local for export; exporting the in-memory state instead.", err);
+    }
+
+    const json = JSON.stringify(dataToExport, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
 
@@ -2020,40 +1605,18 @@
    * Validates and sanitizes an imported backup's raw text, then — if it
    * contains anything usable — opens the Replace/Merge/Cancel confirmation.
    * Nothing is written to state or storage here; this function only reads
-   * and validates.
+   * and validates. The actual parsing/validation is parseImportedBackup()
+   * (js/shared/store.js), shared unchanged with the Options page's own
+   * import flow.
    */
   function processImportedText(text) {
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch (err) {
-      showToast("That file is not valid JSON.", "error");
+    const result = parseImportedBackup(text);
+    if (!result.ok) {
+      showToast(result.message, "error");
       return;
     }
-
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      showToast("That file isn't a recognized backup format.", "error");
-      return;
-    }
-
-    if (parsed.version !== 2) {
-      showToast("That backup's version isn't supported by this version of the app.", "error");
-      return;
-    }
-
-    // sanitizeState() does the heavy lifting: validates structure, URLs,
-    // and categories field-by-field, drops individually malformed records
-    // instead of failing the whole import, and resolves duplicate ids /
-    // duplicate normalized URLs within the file itself.
-    const clean = sanitizeState(parsed);
-
-    if (clean.categories.length === 0 && clean.shortcuts.length === 0) {
-      showToast("That backup didn't contain any usable shortcuts or categories.", "error");
-      return;
-    }
-
-    pendingImport = clean;
-    openImportConfirm(clean);
+    pendingImport = result.state;
+    openImportConfirm(result.state);
   }
 
   function openImportConfirm(clean) {
@@ -2080,7 +1643,6 @@
       return;
     }
     const next = pendingImport;
-    const savedOk = persistState(next);
     state = next;
     currentView = { type: "all", categoryId: null };
     searchTerm = "";
@@ -2090,80 +1652,19 @@
     applyAllAppearance(); // a Replace swaps in the backup's settings too (theme, grid size, background, ...)
     closeImportConfirm();
 
-    showToast(
-      savedOk
-        ? `Import complete. Replaced with ${next.shortcuts.length} shortcuts.`
-        : "Import applied for this session, but could not be saved permanently.",
-      savedOk ? "success" : "error"
-    );
+    persistState(next).then((savedOk) => {
+      showToast(
+        savedOk
+          ? `Import complete. Replaced with ${next.shortcuts.length} shortcuts.`
+          : "Import applied for this session, but could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
-  /**
-   * Merges an imported (already-sanitized) state into the current one.
-   * Existing data always wins on conflict and is never modified or
-   * removed — merge only ever adds:
-   *  - Categories are matched by case-insensitive name; a match reuses the
-   *    existing category (resolves "conflicting categories") instead of
-   *    creating a duplicate. New categories whose id collides with an
-   *    existing one are assigned a fresh id.
-   *  - Shortcuts whose normalized URL already exists are skipped (resolves
-   *    duplicate normalized URLs — the existing shortcut is kept as-is).
-   *    Surviving shortcuts whose id collides with an existing one are
-   *    assigned a fresh id (resolves duplicate IDs).
-   */
-  function mergeStates(current, imported) {
-    const nextCategories = current.categories.map((c) => ({ ...c }));
-    const nameToId = new Map(nextCategories.map((c) => [c.name.toLowerCase(), c.id]));
-    const categoryIdMap = new Map(); // imported category id -> resolved id in nextCategories
-    let nextCategoryPosition = nextCategories.length
-      ? Math.max(...nextCategories.map((c) => c.position)) + 1
-      : 0;
-    let addedCategories = 0;
-
-    imported.categories.forEach((cat) => {
-      const key = cat.name.toLowerCase();
-      if (nameToId.has(key)) {
-        categoryIdMap.set(cat.id, nameToId.get(key));
-        return;
-      }
-      const newId = nextCategories.some((c) => c.id === cat.id) ? generateId() : cat.id;
-      const newCategory = { id: newId, name: cat.name, icon: cat.icon, position: nextCategoryPosition++ };
-      nextCategories.push(newCategory);
-      nameToId.set(key, newId);
-      categoryIdMap.set(cat.id, newId);
-      addedCategories++;
-    });
-
-    const nextShortcuts = current.shortcuts.map((sc) => ({ ...sc }));
-    const existingUrlKeys = new Set(nextShortcuts.map((sc) => comparableUrlKey(sc.url)));
-    const existingIds = new Set(nextShortcuts.map((sc) => sc.id));
-    let nextPosition = nextShortcuts.length ? Math.max(...nextShortcuts.map((sc) => sc.position)) + 1 : 0;
-    let addedShortcuts = 0;
-    let skippedShortcuts = 0;
-
-    imported.shortcuts.forEach((sc) => {
-      const urlKey = comparableUrlKey(sc.url);
-      if (existingUrlKeys.has(urlKey)) {
-        skippedShortcuts++; // existing shortcut for this URL always wins
-        return;
-      }
-      const newId = existingIds.has(sc.id) ? generateId() : sc.id;
-      const mappedCategoryId =
-        sc.categoryId && categoryIdMap.has(sc.categoryId) ? categoryIdMap.get(sc.categoryId) : null;
-
-      nextShortcuts.push({ ...sc, id: newId, categoryId: mappedCategoryId, position: nextPosition++ });
-      existingUrlKeys.add(urlKey);
-      existingIds.add(newId);
-      addedShortcuts++;
-    });
-
-    return {
-      state: { version: 2, settings: current.settings, categories: nextCategories, shortcuts: nextShortcuts },
-      addedShortcuts,
-      addedCategories,
-      skippedShortcuts,
-    };
-  }
+  // mergeStates() is imported from js/shared/store.js (shared unchanged
+  // with the Options page's own Merge action) — see confirmImportMerge()
+  // below for where it's called.
 
   function confirmImportMerge() {
     if (!pendingImport) {
@@ -2171,7 +1672,6 @@
       return;
     }
     const result = mergeStates(state, pendingImport);
-    const savedOk = persistState(result.state);
     state = result.state;
 
     render();
@@ -2180,12 +1680,14 @@
     const skippedNote = result.skippedShortcuts
       ? ` ${result.skippedShortcuts} duplicate shortcut${result.skippedShortcuts === 1 ? "" : "s"} skipped.`
       : "";
-    showToast(
-      savedOk
-        ? `Merged: added ${result.addedShortcuts} shortcuts, ${result.addedCategories} categories.${skippedNote}`
-        : "Merge applied for this session, but could not be saved permanently.",
-      savedOk ? "success" : "error"
-    );
+    persistState(result.state).then((savedOk) => {
+      showToast(
+        savedOk
+          ? `Merged: added ${result.addedShortcuts} shortcuts, ${result.addedCategories} categories.${skippedNote}`
+          : "Merge applied for this session, but could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   // ==========================================================================
@@ -2272,13 +1774,21 @@
    * mutation in the app does. Settings changes don't get a success toast
    * (there are too many of them for that to stay useful) — only failures
    * are worth interrupting the user for.
+   *
+   * Some settings controls (e.g. dragging the background color picker) can
+   * call this several times in quick succession. That's unchanged from
+   * V2.2 and still safe here: persistState()'s write queue (in
+   * js/shared/store.js) guarantees these land in order and only the last
+   * one's outcome is ever shown, so a burst of calls can't corrupt what's
+   * saved or produce a flood of contradictory toasts.
    */
   function commitSettingsChange(applyFn) {
-    const savedOk = persistState(state);
     applyFn();
-    if (!savedOk) {
-      showToast("Setting changed for this session, but could not be saved permanently.", "error");
-    }
+    persistState(state).then((savedOk) => {
+      if (!savedOk) {
+        showToast("Setting changed for this session, but could not be saved permanently.", "error");
+      }
+    });
   }
 
   function handleThemeChange(e) {
@@ -2660,8 +2170,8 @@
     else if (action === "delete-category") openCategoryDeleteConfirm(categoryId, target);
   }
 
-  function init() {
-    state = loadState();
+  async function init() {
+    state = await loadState();
     render();
 
     // V2.2 — Appearance/display/background apply on load, and a listener so
@@ -2675,6 +2185,28 @@
       }
     }
     applyAllAppearance();
+
+    // V3.0 Task 4 — live sync: if the Options page (or another dashboard
+    // tab) changes settings/shortcuts/categories, reflect it here without
+    // needing a refresh. Every write this page makes itself also fires
+    // this listener (chrome.storage.onChanged doesn't distinguish who
+    // wrote it), so incoming data is compared against the in-memory
+    // `state` first — if they already match, this is just an echo of our
+    // own save and there's nothing to do. A change mid-drag is skipped
+    // outright rather than yanking the grid out from under the user;
+    // it'll simply apply on the next change after the drag ends (nothing
+    // is lost — that next persistState() call carries the same data).
+    if (window.chrome && chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local" || !changes[STORAGE_KEY_V2] || draggingId) return;
+        const incoming = changes[STORAGE_KEY_V2].newValue;
+        if (incoming === undefined) return; // a clear, not a normal settings write — ignore
+        if (JSON.stringify(incoming) === JSON.stringify(state)) return; // our own write echoing back
+        state = sanitizeState(incoming); // defensive — mirrors loadState()'s own sanitize-on-read
+        render();
+        applyAllAppearance();
+      });
+    }
 
     // V2.2 — Settings tabs (click + arrow-key navigation).
     settingsTabsEl.addEventListener("click", handleSettingsTabsClick);
@@ -2697,6 +2229,13 @@
     // and any characters, since it's a plain substring match (no regex).
     searchInput.addEventListener("input", () => {
       searchTerm = normalizeSearchText(searchInput.value);
+      render();
+    });
+
+    // Sort — display-only (see sortShortcuts()); never written to storage
+    // and never changes state.shortcuts[i].position.
+    sortSelect.addEventListener("change", () => {
+      sortOrder = sortSelect.value === "az" || sortSelect.value === "za" ? sortSelect.value : "manual";
       render();
     });
 
@@ -2831,4 +2370,4 @@
   }
 
   document.addEventListener("DOMContentLoaded", init);
-})();
+}

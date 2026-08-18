@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Shortcut Dashboard</title>
+
+  <!-- Applies the saved theme before first paint, same approach as
+       newtab.html's js/theme-init.js — reads chrome.storage.local (this
+       popup is a separate document/context, so it needs its own copy of
+       this small pre-paint step). -->
+  <script src="popup-theme-init.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup">
+    <header class="popup-header">
+      <span class="popup-brand-mark" aria-hidden="true">&gt;_</span>
+      <span class="popup-brand-name">Shortcut Dashboard</span>
+    </header>
+
+    <button type="button" id="openDashboardBtn" class="btn btn-primary popup-open-btn">
+      Open Dashboard
+    </button>
+
+    <div class="popup-actions">
+      <button type="button" id="settingsBtn" class="btn btn-ghost popup-action-btn">
+        <span aria-hidden="true">⚙</span> Settings
+      </button>
+    </div>
+
+    <section class="popup-section" aria-labelledby="favoritesHeading">
+      <h2 id="favoritesHeading" class="popup-section-title">
+        <span aria-hidden="true">⭐</span> Favorites
+      </h2>
+
+      <p id="favoritesEmpty" class="popup-empty" hidden>No favourite shortcuts yet.</p>
+      <p id="popupError" class="popup-empty popup-error" hidden>
+        Couldn't load your shortcuts right now.
+      </p>
+
+      <ul id="favoritesList" class="popup-fav-list" hidden></ul>
+    </section>
+
+    <div class="popup-divider" role="separator"></div>
+
+    <dl class="popup-stats">
+      <div class="popup-stat">
+        <dt>Shortcuts</dt>
+        <dd id="statShortcuts">–</dd>
+      </div>
+      <div class="popup-stat">
+        <dt>Favorites</dt>
+        <dd id="statFavorites">–</dd>
+      </div>
+      <div class="popup-stat">
+        <dt>Categories</dt>
+        <dd id="statCategories">–</dd>
+      </div>
+    </dl>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

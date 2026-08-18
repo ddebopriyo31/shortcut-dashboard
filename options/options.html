@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Settings — Shortcut Dashboard</title>
+
+  <!-- Applies the saved theme before first paint, same approach as
+       ../js/theme-init.js and ../popup/popup-theme-init.js — this page is
+       its own separate document/context, so it needs its own copy. -->
+  <script src="options-theme-init.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- The dashboard's own stylesheet: design tokens, fonts, .btn/.segmented/
+       .toggle-row/.switch/.field/.settings-section/.modal/.toast, etc.
+       Reused as-is so every control here looks identical to the same
+       control in the dashboard's Settings modal — this page adds only the
+       page-level layout (options.css) those components didn't need. -->
+  <link rel="stylesheet" href="../css/style.css" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="options-page">
+    <header class="options-header">
+      <span class="options-brand-mark" aria-hidden="true">&gt;_</span>
+      <div>
+        <h1 class="options-title">Shortcut Dashboard</h1>
+        <p class="options-subtitle">Settings</p>
+      </div>
+    </header>
+
+    <main class="options-main">
+      <!-- Appearance -->
+      <section class="options-card" aria-labelledby="appearanceHeading">
+        <h2 id="appearanceHeading" class="options-card-title">Appearance</h2>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Theme</h3>
+          <div class="segmented" id="themeControl" role="radiogroup" aria-label="Theme">
+            <label class="segmented-option">
+              <input type="radio" name="theme" value="dark" />
+              <span>Dark</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="theme" value="light" />
+              <span>Light</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="theme" value="system" />
+              <span>System</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Grid size</h3>
+          <div class="segmented" id="gridSizeControl" role="radiogroup" aria-label="Grid size">
+            <label class="segmented-option">
+              <input type="radio" name="gridSize" value="small" />
+              <span>Small</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="gridSize" value="medium" />
+              <span>Medium</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="gridSize" value="large" />
+              <span>Large</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Show on dashboard</h3>
+          <label class="toggle-row">
+            <span>Search bar</span>
+            <input type="checkbox" id="showSearchInput" class="switch" />
+          </label>
+          <label class="toggle-row">
+            <span>Domain on each card</span>
+            <input type="checkbox" id="showDomainInput" class="switch" />
+          </label>
+          <label class="toggle-row">
+            <span>Clock and date</span>
+            <input type="checkbox" id="showClockInput" class="switch" />
+          </label>
+        </section>
+      </section>
+
+      <!-- Background -->
+      <section class="options-card" aria-labelledby="backgroundHeading">
+        <h2 id="backgroundHeading" class="options-card-title">Background</h2>
+
+        <section class="settings-section">
+          <div class="segmented segmented-wrap" id="backgroundTypeControl" role="radiogroup" aria-label="Background type">
+            <label class="segmented-option">
+              <input type="radio" name="backgroundType" value="default" />
+              <span>Default</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="backgroundType" value="color" />
+              <span>Solid color</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="backgroundType" value="gradient" />
+              <span>Gradient</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="backgroundType" value="image" />
+              <span>Image URL</span>
+            </label>
+          </div>
+
+          <div id="bgColorFields" class="bg-fields" hidden>
+            <label class="field field-color">
+              <span class="field-label">Color</span>
+              <input type="color" id="bgColorInput" value="#141822" />
+            </label>
+          </div>
+
+          <div id="bgGradientFields" class="bg-fields" hidden>
+            <label class="field field-color">
+              <span class="field-label">From</span>
+              <input type="color" id="bgGradientFromInput" value="#1b2030" />
+            </label>
+            <label class="field field-color">
+              <span class="field-label">To</span>
+              <input type="color" id="bgGradientToInput" value="#0b0d12" />
+            </label>
+          </div>
+
+          <div id="bgImageFields" class="bg-fields" hidden>
+            <label class="field">
+              <span class="field-label">Image URL</span>
+              <input
+                type="text"
+                id="bgImageUrlInput"
+                placeholder="https://example.com/wallpaper.jpg"
+                autocomplete="off"
+              />
+            </label>
+            <p class="field-hint">Must be a direct http/https image link. Falls back to the default background if it fails to load.</p>
+            <p id="bgImageError" class="form-error" role="alert" hidden></p>
+          </div>
+        </section>
+      </section>
+
+      <!-- Data -->
+      <section class="options-card" aria-labelledby="dataHeading">
+        <h2 id="dataHeading" class="options-card-title">Data</h2>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Backup</h3>
+          <p class="settings-section-copy">Export everything as a JSON file, or import a backup to restore or merge shortcuts.</p>
+          <div class="settings-actions">
+            <button type="button" id="exportBtn" class="btn btn-ghost">Export</button>
+            <button type="button" id="importBtn" class="btn btn-ghost">Import</button>
+            <input type="file" id="importFileInput" accept="application/json,.json" hidden />
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Reset</h3>
+          <p class="settings-section-copy">Permanently remove every shortcut, category, and setting stored by this extension. This can't be undone — export a backup first if you're not sure.</p>
+          <div class="settings-actions">
+            <button type="button" id="resetBtn" class="btn btn-danger">Reset all data…</button>
+          </div>
+        </section>
+      </section>
+
+      <!-- About -->
+      <section class="options-card" aria-labelledby="aboutHeading">
+        <h2 id="aboutHeading" class="options-card-title">About</h2>
+        <p class="options-about-name">Shortcut Dashboard</p>
+        <p class="options-about-version" id="versionText">Version —</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- Import: Replace / Merge / Cancel confirmation (same markup/classes as the dashboard's) -->
+  <div id="importConfirmOverlay" class="modal-overlay" hidden>
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="importConfirmTitle">
+      <div class="modal-header">
+        <h2 id="importConfirmTitle">Import backup</h2>
+      </div>
+      <p class="delete-copy" id="importConfirmSummary"></p>
+      <p class="delete-copy">Replace clears your current dashboard and uses only the imported data. Merge keeps everything you have and adds what's new.</p>
+      <div class="modal-actions modal-actions-import">
+        <button type="button" id="importCancelBtn" class="btn btn-ghost">Cancel</button>
+        <button type="button" id="importMergeBtn" class="btn btn-ghost">Merge</button>
+        <button type="button" id="importReplaceBtn" class="btn btn-danger">Replace</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset: intentional confirmation before any data is cleared -->
+  <div id="resetConfirmOverlay" class="modal-overlay" hidden>
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="resetConfirmTitle">
+      <div class="modal-header">
+        <h2 id="resetConfirmTitle">Reset all data?</h2>
+      </div>
+      <p class="delete-copy">This permanently deletes every shortcut, category, and setting stored by Shortcut Dashboard, on this device. It can't be undone.</p>
+      <div class="modal-actions">
+        <button type="button" id="resetCancelBtn" class="btn btn-ghost">Cancel</button>
+        <button type="button" id="resetConfirmBtn" class="btn btn-danger">Reset everything</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications (e.g. storage failures) -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>
