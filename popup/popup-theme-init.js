@@ -2,7 +2,7 @@
 // the popup doesn't flash the wrong theme when it opens. Same logic and
 // same storage key as ../js/theme-init.js — duplicated here (rather than
 // shared via a <script> include) because the popup is loaded as its own
-// top-level document/context, separate from newtab.html.
+// top-level document/context, separate from dashboard.html.
 //
 // Reads chrome.storage.local only; never writes anything. See
 // ../js/theme-init.js for the note on why this can occasionally show a

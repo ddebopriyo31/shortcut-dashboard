@@ -27,7 +27,7 @@
 
    {
      version: 2,
-     settings: { theme, gridSize, showSearch, showDomain, showClock },
+     settings: { theme, cardSize, iconSize, gridDensity, gridColumns, showSearch, showDomain, showClock },
      categories: [ { id, name, icon, position } ],
      shortcuts: [
        {
@@ -45,6 +45,7 @@ import {
   MAX_EMOJI_LENGTH,
   STORAGE_KEY_V2,
   defaultSettings,
+  defaultLayoutSettings,
   generateId,
   normalizeAndValidateUrl,
   comparableUrlKey,
@@ -136,7 +137,19 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
 
   // V2.2 — Appearance controls
   const themeControl = document.getElementById("themeControl");
-  const gridSizeControl = document.getElementById("gridSizeControl");
+
+  // V3.0 Task 7 — Appearance: layout controls (decomposed from the old
+  // single "grid size" setting — see js/shared/store.js's sanitizeSettings)
+  const cardSizeControl = document.getElementById("cardSizeControl");
+  const iconSizeControl = document.getElementById("iconSizeControl");
+  const gridDensityControl = document.getElementById("gridDensityControl");
+  const gridColumnsControl = document.getElementById("gridColumnsControl");
+  const resetAppearanceBtn = document.getElementById("resetAppearanceBtn");
+
+  // V3.0.9 — Dashboard Shortcut status (Keyboard tab)
+  const shortcutStatus = document.getElementById("shortcutStatus");
+  const openShortcutSettingsBtn = document.getElementById("openShortcutSettingsBtn");
+  const refreshShortcutBtn = document.getElementById("refreshShortcutBtn");
 
   // V2.2 — Display controls
   const showSearchInput = document.getElementById("showSearchInput");
@@ -238,9 +251,20 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
     if (state.settings.theme === "system") applyTheme();
   }
 
-  function applyGridSize() {
-    grid.classList.remove("grid-small", "grid-medium", "grid-large");
-    grid.classList.add(`grid-${state.settings.gridSize}`);
+  /**
+   * Applies the four Task 7 layout preferences (card size, icon size,
+   * grid density, grid columns) as data-attributes on the grid element.
+   * Purely a CSS hook — see css/style.css's `.shortcut-grid[data-*]`
+   * rules for what each actually changes. Setting these four attributes
+   * is the entire cost of a layout change: no card is rebuilt, no
+   * re-render happens, nothing is re-read from storage — the existing
+   * card DOM just repaints against different CSS custom properties.
+   */
+  function applyGridLayout() {
+    grid.dataset.cardSize = state.settings.cardSize;
+    grid.dataset.iconSize = state.settings.iconSize;
+    grid.dataset.density = state.settings.gridDensity;
+    grid.dataset.columns = state.settings.gridColumns;
   }
 
   function applyDisplayOptions() {
@@ -321,7 +345,7 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
 
   function applyAllAppearance() {
     applyTheme();
-    applyGridSize();
+    applyGridLayout();
     applyDisplayOptions();
     applyBackground();
   }
@@ -1649,7 +1673,7 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
     searchInput.value = "";
 
     render();
-    applyAllAppearance(); // a Replace swaps in the backup's settings too (theme, grid size, background, ...)
+    applyAllAppearance(); // a Replace swaps in the backup's settings too (theme, layout, background, ...)
     closeImportConfirm();
 
     persistState(next).then((savedOk) => {
@@ -1744,8 +1768,17 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
     themeControl.querySelectorAll('input[name="theme"]').forEach((r) => {
       r.checked = r.value === state.settings.theme;
     });
-    gridSizeControl.querySelectorAll('input[name="gridSize"]').forEach((r) => {
-      r.checked = r.value === state.settings.gridSize;
+    cardSizeControl.querySelectorAll('input[name="cardSize"]').forEach((r) => {
+      r.checked = r.value === state.settings.cardSize;
+    });
+    iconSizeControl.querySelectorAll('input[name="iconSize"]').forEach((r) => {
+      r.checked = r.value === state.settings.iconSize;
+    });
+    gridDensityControl.querySelectorAll('input[name="gridDensity"]').forEach((r) => {
+      r.checked = r.value === state.settings.gridDensity;
+    });
+    gridColumnsControl.querySelectorAll('input[name="gridColumns"]').forEach((r) => {
+      r.checked = r.value === state.settings.gridColumns;
     });
 
     showSearchInput.checked = state.settings.showSearch;
@@ -1797,15 +1830,86 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
     commitSettingsChange(applyTheme);
   }
 
-  function handleGridSizeChange(e) {
-    if (e.target.name !== "gridSize") return;
-    state.settings.gridSize = e.target.value;
-    commitSettingsChange(applyGridSize);
+  function handleCardSizeChange(e) {
+    if (e.target.name !== "cardSize") return;
+    state.settings.cardSize = e.target.value;
+    commitSettingsChange(applyGridLayout);
+  }
+
+  function handleIconSizeChange(e) {
+    if (e.target.name !== "iconSize") return;
+    state.settings.iconSize = e.target.value;
+    commitSettingsChange(applyGridLayout);
+  }
+
+  function handleGridDensityChange(e) {
+    if (e.target.name !== "gridDensity") return;
+    state.settings.gridDensity = e.target.value;
+    commitSettingsChange(applyGridLayout);
+  }
+
+  function handleGridColumnsChange(e) {
+    if (e.target.name !== "gridColumns") return;
+    state.settings.gridColumns = e.target.value;
+    commitSettingsChange(applyGridLayout);
+  }
+
+  /**
+   * Restores card size, icon size, grid density, and grid columns to
+   * their V3 defaults. Does not touch theme, background, display
+   * toggles, or any shortcut/category/favorite data — see
+   * defaultLayoutSettings() (js/shared/store.js), which returns only
+   * these four fields for exactly this reason.
+   */
+  function handleResetAppearance() {
+    Object.assign(state.settings, defaultLayoutSettings());
+    populateSettingsControls();
+    applyGridLayout();
+    persistState(state).then((savedOk) => {
+      showToast(
+        savedOk ? "Appearance settings reset to defaults." : "Appearance reset for this session, but could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   function handleShowSearchChange() {
     state.settings.showSearch = showSearchInput.checked;
     commitSettingsChange(applyDisplayOptions);
+  }
+
+  // ==========================================================================
+  // Dashboard Shortcut status (v3.0.9)
+  //
+  // Chrome — not this extension — owns registering and validating keyboard
+  // shortcuts for extension commands; there's no API to set one
+  // programmatically. This mirrors the identical logic in
+  // options/options.js: a read-only status via chrome.commands.getAll()
+  // plus a link to Chrome's own Shortcuts page. See that file's comment
+  // for the full reasoning.
+  // ==========================================================================
+  async function refreshShortcutStatus() {
+    if (!(window.chrome && chrome.commands && chrome.commands.getAll)) {
+      shortcutStatus.textContent = "Couldn't check your current shortcut.";
+      return;
+    }
+    try {
+      const commands = await chrome.commands.getAll();
+      const command = commands.find((c) => c.name === "open-dashboard");
+      const shortcut = command && command.shortcut;
+      shortcutStatus.textContent = shortcut
+        ? `Enabled — ${shortcut}`
+        : "Not set — choose one on Chrome's Shortcuts page.";
+    } catch (err) {
+      console.error("Could not read the current keyboard shortcut:", err);
+      shortcutStatus.textContent = "Couldn't check your current shortcut.";
+    }
+  }
+
+  function openChromeShortcutSettings() {
+    if (window.chrome && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+    }
   }
 
   function handleShowDomainChange() {
@@ -2215,7 +2319,18 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "./shared/appeara
     // V2.2 — Appearance, Display, and Background controls. Each applies and
     // persists immediately — there's no separate "Save" step.
     themeControl.addEventListener("change", handleThemeChange);
-    gridSizeControl.addEventListener("change", handleGridSizeChange);
+    cardSizeControl.addEventListener("change", handleCardSizeChange);
+    iconSizeControl.addEventListener("change", handleIconSizeChange);
+    gridDensityControl.addEventListener("change", handleGridDensityChange);
+    gridColumnsControl.addEventListener("change", handleGridColumnsChange);
+    resetAppearanceBtn.addEventListener("click", handleResetAppearance);
+
+    refreshShortcutStatus();
+    openShortcutSettingsBtn.addEventListener("click", openChromeShortcutSettings);
+    refreshShortcutBtn.addEventListener("click", refreshShortcutStatus);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshShortcutStatus();
+    });
     showSearchInput.addEventListener("change", handleShowSearchChange);
     showDomainInput.addEventListener("change", handleShowDomainChange);
     showClockInput.addEventListener("change", handleShowClockChange);

@@ -7,6 +7,12 @@
    no state of its own — Chrome spins it up only when a registered command
    fires and lets it go idle immediately after.
 
+   As of v3.0.9, the dashboard (dashboard.html) is no longer registered as
+   Chrome's New Tab page — Ctrl+T, the "+" button, and Chrome's own New
+   Tab (including its search box) are entirely Chrome's again, untouched
+   by this extension. This command — plus the popup's "Open Dashboard"
+   button — are now the only ways the dashboard opens.
+
    The "_execute_action" command (Open Popup) needs no code at all —
    that's a reserved command name Chrome itself handles by opening the
    toolbar popup (popup/popup.html), the same as clicking the icon.
@@ -19,17 +25,18 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 /**
- * Opens the dashboard (New Tab page), focusing an already-open dashboard
- * tab instead of creating a new one when one exists — the New Tab
- * override means most windows already have at least one dashboard tab
- * sitting open, so defaulting to "switch to it" avoids piling up
- * duplicates every time the command fires.
+ * Opens the dashboard, focusing an already-open dashboard tab instead of
+ * creating a new one when one exists, so repeatedly triggering the
+ * command doesn't pile up duplicate tabs. Never touches any other tab,
+ * never navigates the user's current tab, and never affects Chrome's own
+ * New Tab behavior — this only ever opens dashboard.html, a normal
+ * extension page like any other.
  *
  * Querying/updating the extension's own page doesn't require the "tabs"
  * permission — that's only needed to read another site's tab details.
  */
 async function openOrFocusDashboard() {
-  const dashboardUrl = chrome.runtime.getURL("newtab.html");
+  const dashboardUrl = chrome.runtime.getURL("dashboard.html");
   try {
     const tabs = await chrome.tabs.query({ url: dashboardUrl });
     if (tabs.length > 0) {

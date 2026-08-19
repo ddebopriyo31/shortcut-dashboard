@@ -12,6 +12,7 @@
 
 import {
   defaultSettings,
+  defaultLayoutSettings,
   loadState,
   persistState,
   mergeStates,
@@ -28,7 +29,11 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
   // DOM references
   // ------------------------------------------------------------------------
   const themeControl = document.getElementById("themeControl");
-  const gridSizeControl = document.getElementById("gridSizeControl");
+  const cardSizeControl = document.getElementById("cardSizeControl");
+  const iconSizeControl = document.getElementById("iconSizeControl");
+  const gridDensityControl = document.getElementById("gridDensityControl");
+  const gridColumnsControl = document.getElementById("gridColumnsControl");
+  const resetAppearanceBtn = document.getElementById("resetAppearanceBtn");
   const showSearchInput = document.getElementById("showSearchInput");
   const showDomainInput = document.getElementById("showDomainInput");
   const showClockInput = document.getElementById("showClockInput");
@@ -57,6 +62,10 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
   const resetConfirmOverlay = document.getElementById("resetConfirmOverlay");
   const resetCancelBtn = document.getElementById("resetCancelBtn");
   const resetConfirmBtn = document.getElementById("resetConfirmBtn");
+
+  const shortcutStatus = document.getElementById("shortcutStatus");
+  const openShortcutSettingsBtn = document.getElementById("openShortcutSettingsBtn");
+  const refreshShortcutBtn = document.getElementById("refreshShortcutBtn");
 
   const versionText = document.getElementById("versionText");
   const toast = document.getElementById("toast");
@@ -199,8 +208,17 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
     themeControl.querySelectorAll('input[name="theme"]').forEach((r) => {
       r.checked = r.value === state.settings.theme;
     });
-    gridSizeControl.querySelectorAll('input[name="gridSize"]').forEach((r) => {
-      r.checked = r.value === state.settings.gridSize;
+    cardSizeControl.querySelectorAll('input[name="cardSize"]').forEach((r) => {
+      r.checked = r.value === state.settings.cardSize;
+    });
+    iconSizeControl.querySelectorAll('input[name="iconSize"]').forEach((r) => {
+      r.checked = r.value === state.settings.iconSize;
+    });
+    gridDensityControl.querySelectorAll('input[name="gridDensity"]').forEach((r) => {
+      r.checked = r.value === state.settings.gridDensity;
+    });
+    gridColumnsControl.querySelectorAll('input[name="gridColumns"]').forEach((r) => {
+      r.checked = r.value === state.settings.gridColumns;
     });
 
     showSearchInput.checked = state.settings.showSearch;
@@ -241,10 +259,46 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
     commitSettingsChange(applyTheme);
   }
 
-  function handleGridSizeChange(e) {
-    if (e.target.name !== "gridSize") return;
-    state.settings.gridSize = e.target.value;
+  function handleCardSizeChange(e) {
+    if (e.target.name !== "cardSize") return;
+    state.settings.cardSize = e.target.value;
     commitSettingsChange();
+  }
+
+  function handleIconSizeChange(e) {
+    if (e.target.name !== "iconSize") return;
+    state.settings.iconSize = e.target.value;
+    commitSettingsChange();
+  }
+
+  function handleGridDensityChange(e) {
+    if (e.target.name !== "gridDensity") return;
+    state.settings.gridDensity = e.target.value;
+    commitSettingsChange();
+  }
+
+  function handleGridColumnsChange(e) {
+    if (e.target.name !== "gridColumns") return;
+    state.settings.gridColumns = e.target.value;
+    commitSettingsChange();
+  }
+
+  /**
+   * Restores card size, icon size, grid density, and grid columns to
+   * their V3 defaults. Does not touch theme, background, display
+   * toggles, or any shortcut/category/favorite data — see
+   * defaultLayoutSettings() (js/shared/store.js), which returns only
+   * these four fields for exactly this reason.
+   */
+  function handleResetAppearance() {
+    Object.assign(state.settings, defaultLayoutSettings());
+    populateControls();
+    persistState(state).then((savedOk) => {
+      showToast(
+        savedOk ? "Appearance settings reset to defaults." : "Appearance reset for this session, but could not be saved permanently.",
+        savedOk ? "success" : "error"
+      );
+    });
   }
 
   function handleShowSearchChange() {
@@ -421,6 +475,42 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
     hideModal(resetConfirmOverlay);
   }
 
+  // ==========================================================================
+  // Dashboard Shortcut (v3.0.9)
+  //
+  // Chrome — not this extension — owns registering and validating keyboard
+  // shortcuts for extension commands. There is no extension API to set or
+  // change one programmatically; the only real control surface is Chrome's
+  // own chrome://extensions/shortcuts page. This section is deliberately a
+  // read-only status display (chrome.commands.getAll(), which reports the
+  // shortcut Chrome actually has registered right now) plus a link to that
+  // page — never a fake picker that would have to guess whether Chrome
+  // would accept a combination.
+  // ==========================================================================
+  async function refreshShortcutStatus() {
+    if (!(window.chrome && chrome.commands && chrome.commands.getAll)) {
+      shortcutStatus.textContent = "Couldn't check your current shortcut.";
+      return;
+    }
+    try {
+      const commands = await chrome.commands.getAll();
+      const command = commands.find((c) => c.name === "open-dashboard");
+      const shortcut = command && command.shortcut;
+      shortcutStatus.textContent = shortcut
+        ? `Enabled — ${shortcut}`
+        : "Not set — choose one on Chrome's Shortcuts page.";
+    } catch (err) {
+      console.error("Could not read the current keyboard shortcut:", err);
+      shortcutStatus.textContent = "Couldn't check your current shortcut.";
+    }
+  }
+
+  function openChromeShortcutSettings() {
+    if (window.chrome && chrome.tabs && chrome.tabs.create) {
+      chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+    }
+  }
+
   function confirmReset() {
     const fresh = { version: 2, settings: defaultSettings(), categories: [], shortcuts: [] };
     state = fresh;
@@ -440,7 +530,7 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
   // Init
   // ==========================================================================
   async function init() {
-    versionText.textContent = `Version ${getExtensionVersion() || "3.0.0"}`;
+    versionText.textContent = `Version ${getExtensionVersion() || "3.0.9"}`;
 
     state = await loadState();
     populateControls();
@@ -456,7 +546,11 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
     applyAllAppearance();
 
     themeControl.addEventListener("change", handleThemeChange);
-    gridSizeControl.addEventListener("change", handleGridSizeChange);
+    cardSizeControl.addEventListener("change", handleCardSizeChange);
+    iconSizeControl.addEventListener("change", handleIconSizeChange);
+    gridDensityControl.addEventListener("change", handleGridDensityChange);
+    gridColumnsControl.addEventListener("change", handleGridColumnsChange);
+    resetAppearanceBtn.addEventListener("click", handleResetAppearance);
     showSearchInput.addEventListener("change", handleShowSearchChange);
     showDomainInput.addEventListener("change", handleShowDomainChange);
     showClockInput.addEventListener("change", handleShowClockChange);
@@ -477,6 +571,16 @@ import { resolveEffectiveTheme, createBackgroundApplier } from "../js/shared/app
     resetBtn.addEventListener("click", openResetConfirm);
     resetCancelBtn.addEventListener("click", closeResetConfirm);
     resetConfirmBtn.addEventListener("click", confirmReset);
+
+    refreshShortcutStatus();
+    openShortcutSettingsBtn.addEventListener("click", openChromeShortcutSettings);
+    refreshShortcutBtn.addEventListener("click", refreshShortcutStatus);
+    // Chrome's Shortcuts page opens in a separate tab — re-check when the
+    // user comes back here, so a change they just made shows up without
+    // needing to remember to click Refresh.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshShortcutStatus();
+    });
 
     // Live sync: if the dashboard (or another Options tab) changes
     // something while this page is open, reflect it here — mirrors the

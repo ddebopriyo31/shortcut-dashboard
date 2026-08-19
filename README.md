@@ -1,44 +1,53 @@
-# Shortcut Dashboard — Chrome Extension (V3.0.6)
+# Shortcut Dashboard — Chrome Extension (V3.0.9)
 
-A fast, keyboard-friendly New Tab dashboard for your shortcuts —
-categories, favorites, search, drag-and-drop reordering, and a
-themeable, customizable background. Everything runs client-side and
-saves to `chrome.storage.local`; there's no server, no account, and no
-cloud sync.
+A fast, keyboard-friendly dashboard for your shortcuts — categories,
+favorites, search, drag-and-drop reordering, and a themeable,
+customizable background. Everything runs client-side and saves to
+`chrome.storage.local`; there's no server, no account, and no cloud
+sync.
 
 This is the **Chrome Extension (Manifest V3)** build of the dashboard,
-converted from the standalone V2.2 web app. It opens automatically
-whenever you open a new tab.
+converted from the standalone V2.2 web app. As of **v3.0.9, it does
+not override Chrome's New Tab page** — `Ctrl+T`, the `+` button, and
+Chrome's own New Tab (including its search box) are entirely Chrome's,
+untouched by this extension. The dashboard instead opens on its own
+keyboard shortcut, from the toolbar popup, or from `chrome://extensions/`.
+See "Opening the dashboard (v3.0.9)" below.
 
 ## Installing (unpacked, for development)
 
 1. Open `chrome://extensions/` in Chrome.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select this `shortcut-dashboard/` folder.
-4. Open a new tab — the dashboard should appear.
+4. Click the extension's toolbar icon and choose **Open Dashboard** —
+   or press its keyboard shortcut once you've set one (see below).
 
 ## Project structure
 
 ```
 shortcut-dashboard/
-├── manifest.json      Manifest V3 config: name, version, New Tab override,
-│                        Options page, popup, icons, keyboard commands,
-│                        background service worker, and the "storage"
-│                        permission (required for chrome.storage.local).
+├── manifest.json      Manifest V3 config: name, version, Options page,
+│                        popup, icons, keyboard commands, background
+│                        service worker, and the "storage" permission
+│                        (required for chrome.storage.local). No New Tab
+│                        override — see "Opening the dashboard" below.
 ├── background/
 │   └── service-worker.js  Tiny — its only job is handling the
 │                            "Open Dashboard" keyboard command (see
 │                            "Keyboard commands" below). No polling, no
 │                            network requests, no persistent state.
-├── newtab.html         All dashboard markup: shortcut grid, sidebar, and
+├── dashboard.html      All dashboard markup: shortcut grid, sidebar, and
 │                        every modal (add/edit shortcut, categories,
 │                        settings, import/export, context menu). Loads
-│                        js/app.js as an ES module.
+│                        js/app.js as an ES module. A normal extension
+│                        page, opened on demand — not a New Tab override
+│                        (renamed from newtab.html in v3.0.9 to reflect
+│                        that).
 ├── css/
 │   └── style.css       All styling — design tokens, light/dark theme,
-│                        grid-size and background customization,
-│                        responsive/mobile rules. Reused as-is by the
-│                        Options page. Unchanged from V2.2.
+│                        card/icon/density/layout customization, and
+│                        background customization, responsive/mobile
+│                        rules. Reused as-is by the Options page.
 ├── js/
 │   ├── theme-init.js   Applies the saved theme as early as possible, to
 │   │                    minimize a flash of the wrong theme. Reads from
@@ -158,8 +167,7 @@ Clicking the extension's toolbar icon opens a small popup
 (`popup/popup.html`) — a quick-access panel, not a second copy of the
 dashboard. It shows:
 
-- An **Open Dashboard** button, which opens the New Tab dashboard in a
-  new tab.
+- An **Open Dashboard** button, which opens the dashboard in a new tab.
 - A **Settings** button, which opens the Options page
   (`chrome.runtime.openOptionsPage()`-equivalent navigation to
   `options/options.html`).
@@ -185,11 +193,12 @@ back. The popup closes itself right after opening a tab.
 (`manifest.json`'s `options_page`), reachable via `chrome://extensions/`
 → Shortcut Dashboard → **Details** → **Extension options**, or via the
 popup's Settings button. It reuses `css/style.css` directly (so every
-control — theme picker, grid-size picker, toggles, color/gradient/image
+control — theme picker, layout pickers, toggles, color/gradient/image
 fields, buttons, modals, toast — looks pixel-identical to the same
 control in the dashboard), organized into four cards:
 
-- **Appearance** — Theme, Grid size, and the "show on dashboard"
+- **Appearance** — Theme, Card size, Icon size, Grid density, Grid
+  layout, Reset appearance, and the "show on dashboard"
   toggles (search bar, domain, clock).
 - **Background** — the same Default/Solid color/Gradient/Image URL
   controls and validation/failure behavior as the dashboard.
@@ -229,6 +238,39 @@ of any kind.
 No cloud sync, accounts, or other unrelated features were added; the
 main dashboard's UI, layout, and behavior are unchanged.
 
+## Opening the dashboard (v3.0.9)
+
+As of v3.0.9, the dashboard is **not** Chrome's New Tab page — `Ctrl+T`,
+the `+` button, and Chrome's own New Tab (including its search box) are
+untouched by this extension. The dashboard (`dashboard.html`, renamed
+from `newtab.html`) opens only when you:
+
+- Press its keyboard shortcut (see "Keyboard commands" below), or
+- Click **Open Dashboard** in the toolbar popup, or
+- Click **Open Dashboard** in the Options page or the dashboard's own
+  Settings → Keyboard tab.
+
+Whichever of these you use, an already-open dashboard tab is focused
+instead of a new one being created — see `background/service-worker.js`.
+
+### Dashboard Shortcut — and a real Chrome limitation
+
+Both the Options page and the dashboard's own Settings → Keyboard tab
+have a **Dashboard Shortcut** section. It shows your current shortcut
+(read live via `chrome.commands.getAll()`) and a button to **Open
+Chrome Shortcut Settings**.
+
+This is deliberately a *status display*, not an interactive picker with
+checkboxes and a Save button — **no Chrome extension API can register
+or change a keyboard shortcut**. The only real control surface is
+Chrome's own `chrome://extensions/shortcuts` page: that's where
+conflicts with Chrome's own shortcuts or another extension's are
+actually detected and rejected, and it's the only place capable of
+doing so correctly. An extension that claimed to save a shortcut
+itself would either be silently doing nothing or would have to guess
+whether Chrome would accept it — both worse than being upfront about
+the limitation, which is what this UI does.
+
 ## Keyboard commands
 
 Registered under `manifest.json`'s `commands` key, visible/editable at
@@ -238,9 +280,10 @@ default risks silently colliding with an existing Chrome shortcut, so
 both are left for the user to bind to whatever they'd like:
 
 - **Open Dashboard** (`open-dashboard`) — handled by
-  `background/service-worker.js`. If a dashboard tab (`newtab.html`) is
-  already open in any window, it's switched to and focused instead of
-  opening a duplicate; otherwise a new one is opened.
+  `background/service-worker.js`. If a dashboard tab (`dashboard.html`)
+  is already open in any window, it's switched to and focused instead of
+  opening a duplicate; otherwise a new one is opened. Works from any
+  website — it's a Chrome extension command, not a page-level listener.
 - **Open the Shortcut Dashboard popup** (`_execute_action`) — a
   reserved Chrome command name; Chrome opens the toolbar popup itself
   when it fires, so no code is needed for it.
@@ -339,6 +382,122 @@ task's guidance not to add storage writes or a new settings field for
 something that already has a clear, safe default. The popup was not
 touched: it reads favorites straight from `chrome.storage.local`,
 independent of this in-memory-only search/filter/sort state.
+
+## Appearance / layout customization
+
+Four independent settings, in both the dashboard's own Settings modal
+and the Options page's Appearance card:
+
+- **Card size** (Small/Medium/Large) — card padding and text size.
+- **Icon size** (Small/Medium/Large) — icon box and glyph size.
+- **Grid density** (Compact/Comfortable/Spacious) — spacing between
+  cards.
+- **Grid layout** (More columns/Standard/Fewer, larger) — a
+  column-*width* preference, not a fixed column count: the grid still
+  uses CSS Grid's `auto-fill`/`minmax()`, so it always wraps to fit the
+  current window at any size: this setting only changes what counts as
+  "one column."
+
+All four apply instantly (no dashboard rebuild — see "What changed"
+below) and persist through the same `chrome.storage.local` layer as
+every other setting. A **Reset appearance** button restores just these
+four to their V3 defaults (Medium/Medium/Comfortable/Standard) —
+theme, background, display toggles, and all shortcut/category/favorite
+data are untouched.
+
+These replaced V2.2/V3's single combined "Grid size" setting, which
+conflated all four of the above into one dial. Upgrading users don't
+see a jarring jump: the first time their stored settings are read, a
+legacy `gridSize` value seeds the new Card size and Icon size fields
+(the two things it most directly corresponded to); Grid density and
+Grid layout — which had no old equivalent — start at their new
+defaults.
+
+## What changed in this task (Task 7)
+
+- `js/shared/store.js`: replaced the `gridSize` setting/constant with
+  four independent ones (`cardSize`, `iconSize`, `gridDensity`,
+  `gridColumns`) plus their validation, added `defaultLayoutSettings()`
+  for the Reset action, and the legacy-`gridSize` migration described
+  above.
+- `css/style.css`: replaced the combined `.grid-small`/`.grid-medium`/
+  `.grid-large` classes with four independent `[data-card-size]`/
+  `[data-icon-size]`/`[data-density]`/`[data-columns]` attribute
+  selectors (desktop and the existing mobile-floor media query).
+- `js/app.js`: renamed `applyGridSize()` → `applyGridLayout()`, which
+  now only sets four `data-*` attributes on the grid container — no
+  card rebuild, no `render()` call, so a layout change costs nothing
+  beyond an instant CSS repaint. Added the four change handlers and
+  `handleResetAppearance()`.
+- `newtab.html` and `options/options.html`: both replace the old
+  single Grid size control with the four new ones plus **Reset
+  appearance**, using the existing `.segmented`/`.settings-section`
+  components — no new visual style introduced.
+- `options/options.js`: mirrors `app.js`'s four handlers and the reset
+  action (no live grid to preview against on this page, so no
+  `applyFn` is needed here the way Background's is).
+
+Because layout changes never touch card DOM, filtering/search/sort
+(Task 6), drag-and-drop, keyboard reorder, and context menus are all
+structurally unaffected — the grid container's listeners (registered
+once in `init()`, delegated rather than per-card) and its children
+never change when a layout setting changes.
+
+## Task 8 — final production audit
+
+A full-project audit (no new features) before calling this V3.0. Full
+details are in the Task 8 report, but in short:
+
+- Fixed 3 stale comment/doc references to the old "grid size" wording
+  left over from Task 7's decomposition. No functional bugs were found.
+- Verified with real, executable tests (not just static review) against
+  the actual `js/shared/store.js` module: V2.2→V3 migration (full
+  fidelity of shortcuts/categories/settings, including the Task 7
+  gridSize→cardSize/iconSize migration), corrupted-JSON resilience,
+  mixed valid/invalid record handling (a `javascript:` URL was
+  correctly rejected), fresh-install behavior, and `mergeStates()`'s
+  duplicate-URL/duplicate-category handling. All passed.
+- Benchmarked the storage layer at 1,000 shortcuts / 30 categories:
+  `sanitizeState` ~28ms, `loadState` ~48ms, `persistState` ~2ms, the
+  Task 6 sidebar search-filter ~2ms — all well within instant/
+  imperceptible range.
+- Re-confirmed: only `js/shared/store.js` touches `localStorage` (the
+  one-time migration read), no `eval`/`new Function`/unsafe `innerHTML`
+  /`insertAdjacentHTML` anywhere, no duplicate function or event-listener
+  registrations, no orphaned/unused files, no leftover TODOs.
+- Confirmed the Favorites hover-actions-row behavior (only the favorite
+  toggle stays visible/interactive on a favorited card; Edit/Delete/
+  Drag stay reachable via the full right-click context menu) is intact
+  and unregressed by Tasks 6/7.
+
+See the Task 8 chat report for the complete bug/fix list, permission
+justification, and honest notes on what could only be reasoned about
+statically rather than verified in a live browser.
+
+## What changed in v3.0.9
+
+**Stopped overriding Chrome's New Tab page.** `Ctrl+T`, the `+` button,
+and Chrome's own New Tab (including its search box) are now entirely
+Chrome's — see "Opening the dashboard (v3.0.9)" above for how the
+dashboard opens instead, and "Dashboard Shortcut" for the new status
+display and its Chrome-imposed limitation.
+
+- `manifest.json`: removed `chrome_url_overrides` entirely; bumped
+  version to `3.0.9`; shortened the description to drop the "New Tab"
+  framing. `commands` and `permissions` (`"storage"` — unchanged) were
+  not touched.
+- Renamed `newtab.html` → `dashboard.html`, since it's no longer a New
+  Tab override and the old name was misleading. Updated every
+  reference: `popup/popup.js`, `background/service-worker.js`, and
+  doc-comment mentions in `popup/popup.html`,
+  `popup/popup-theme-init.js`, and `js/shared/store.js`.
+- Added the **Dashboard Shortcut** section (status + link to Chrome's
+  Shortcuts page) to both the Options page and the dashboard's own
+  Settings → Keyboard tab — identical logic in `options/options.js` and
+  `js/app.js`, both reading `chrome.commands.getAll()` live and
+  re-checking automatically when the tab regains focus.
+- No permission changes, no changes to shortcut/category/favorite data
+  or existing dashboard functionality.
 
 See [CHANGELOG-V2.2.md](CHANGELOG-V2.2.md), [CHANGELOG-V2.1.md](CHANGELOG-V2.1.md),
 and [CHANGELOG-V2.md](CHANGELOG-V2.md) for the dashboard's earlier history.

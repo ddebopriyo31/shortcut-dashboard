@@ -5,7 +5,7 @@
    and chrome.storage.local persistence (including the one-time V2.2/V1.1
    -> V3 migration). This is a plain ES module with no DOM dependencies at
    all, so it can be imported unchanged by both the dashboard
-   (../app.js, loaded by newtab.html) and the Options page
+   (../app.js, loaded by dashboard.html) and the Options page
    (../../options/options.js) — neither one duplicates this logic, and
    both always read/write the exact same chrome.storage.local key.
 
@@ -23,14 +23,20 @@ export const MAX_EMOJI_LENGTH = 16;
 export const ALLOWED_PROTOCOLS = ["http:", "https:"];
 export const ICON_TYPES = ["favicon", "image", "emoji", "letter"];
 export const THEME_MODES = ["dark", "light", "system"];
-export const GRID_SIZES = ["small", "medium", "large"];
+export const CARD_SIZES = ["small", "medium", "large"];
+export const ICON_SIZES = ["small", "medium", "large"];
+export const GRID_DENSITIES = ["compact", "comfortable", "spacious"];
+export const GRID_COLUMN_PREFS = ["more", "standard", "fewer"]; // column-width preference, not a fixed count — see js/app.js applyGridLayout()
 export const BACKGROUND_TYPES = ["default", "color", "gradient", "image"];
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 export function defaultSettings() {
   return {
     theme: "dark",
-    gridSize: "medium",
+    cardSize: "medium",
+    iconSize: "medium",
+    gridDensity: "comfortable",
+    gridColumns: "standard",
     showSearch: true,
     showDomain: true,
     showClock: false,
@@ -42,6 +48,18 @@ export function defaultSettings() {
       imageUrl: "",
     },
   };
+}
+
+/**
+ * Just the four Task 7 layout preferences (card size, icon size, grid
+ * density, grid columns) at their defaults — used by the "Reset
+ * Appearance" action so it can restore only these fields without
+ * touching theme, background, display toggles, or (obviously) any
+ * shortcut/category data.
+ */
+export function defaultLayoutSettings() {
+  const { cardSize, iconSize, gridDensity, gridColumns } = defaultSettings();
+  return { cardSize, iconSize, gridDensity, gridColumns };
 }
 
 export function generateId() {
@@ -277,9 +295,25 @@ function sanitizeBackground(raw) {
 function sanitizeSettings(raw) {
   const defaults = defaultSettings();
   if (!raw || typeof raw !== "object") return defaults;
+
+  // One-time soft migration: Tasks 1-6 had a single combined "gridSize"
+  // (small/medium/large) controlling card size, icon size, spacing, and
+  // column width all together. Task 7 splits that into four independent
+  // settings. A legacy gridSize value (if present, and only if the new
+  // fields aren't already set) becomes the starting point for the two
+  // fields it most directly corresponded to — card size and icon size —
+  // so an upgrading user's dashboard doesn't visually jump on next load.
+  // Density/columns have no old equivalent to inherit, so they just take
+  // the new defaults. This never writes anything itself — sanitizeState()
+  // already writes back a self-healing save when needed.
+  const legacyGridSize = CARD_SIZES.includes(raw.gridSize) ? raw.gridSize : null;
+
   return {
     theme: THEME_MODES.includes(raw.theme) ? raw.theme : defaults.theme,
-    gridSize: GRID_SIZES.includes(raw.gridSize) ? raw.gridSize : defaults.gridSize,
+    cardSize: CARD_SIZES.includes(raw.cardSize) ? raw.cardSize : legacyGridSize || defaults.cardSize,
+    iconSize: ICON_SIZES.includes(raw.iconSize) ? raw.iconSize : legacyGridSize || defaults.iconSize,
+    gridDensity: GRID_DENSITIES.includes(raw.gridDensity) ? raw.gridDensity : defaults.gridDensity,
+    gridColumns: GRID_COLUMN_PREFS.includes(raw.gridColumns) ? raw.gridColumns : defaults.gridColumns,
     showSearch: typeof raw.showSearch === "boolean" ? raw.showSearch : defaults.showSearch,
     showDomain: typeof raw.showDomain === "boolean" ? raw.showDomain : defaults.showDomain,
     showClock: typeof raw.showClock === "boolean" ? raw.showClock : defaults.showClock,

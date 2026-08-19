@@ -58,20 +58,81 @@
         </section>
 
         <section class="settings-section">
-          <h3 class="settings-section-title">Grid size</h3>
-          <div class="segmented" id="gridSizeControl" role="radiogroup" aria-label="Grid size">
+          <h3 class="settings-section-title">Card size</h3>
+          <div class="segmented" id="cardSizeControl" role="radiogroup" aria-label="Card size">
             <label class="segmented-option">
-              <input type="radio" name="gridSize" value="small" />
+              <input type="radio" name="cardSize" value="small" />
               <span>Small</span>
             </label>
             <label class="segmented-option">
-              <input type="radio" name="gridSize" value="medium" />
+              <input type="radio" name="cardSize" value="medium" />
               <span>Medium</span>
             </label>
             <label class="segmented-option">
-              <input type="radio" name="gridSize" value="large" />
+              <input type="radio" name="cardSize" value="large" />
               <span>Large</span>
             </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Icon size</h3>
+          <div class="segmented" id="iconSizeControl" role="radiogroup" aria-label="Icon size">
+            <label class="segmented-option">
+              <input type="radio" name="iconSize" value="small" />
+              <span>Small</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="iconSize" value="medium" />
+              <span>Medium</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="iconSize" value="large" />
+              <span>Large</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Grid density</h3>
+          <div class="segmented" id="gridDensityControl" role="radiogroup" aria-label="Grid density">
+            <label class="segmented-option">
+              <input type="radio" name="gridDensity" value="compact" />
+              <span>Compact</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="gridDensity" value="comfortable" />
+              <span>Comfortable</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="gridDensity" value="spacious" />
+              <span>Spacious</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Grid layout</h3>
+          <p class="settings-section-copy">A column-width preference — the grid still wraps to fit your screen at any size.</p>
+          <div class="segmented" id="gridColumnsControl" role="radiogroup" aria-label="Grid layout">
+            <label class="segmented-option">
+              <input type="radio" name="gridColumns" value="more" />
+              <span>More columns</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="gridColumns" value="standard" />
+              <span>Standard</span>
+            </label>
+            <label class="segmented-option">
+              <input type="radio" name="gridColumns" value="fewer" />
+              <span>Fewer, larger</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-actions">
+            <button type="button" id="resetAppearanceBtn" class="btn btn-ghost">Reset appearance</button>
           </div>
         </section>
 
@@ -147,6 +208,34 @@
             <p class="field-hint">Must be a direct http/https image link. Falls back to the default background if it fails to load.</p>
             <p id="bgImageError" class="form-error" role="alert" hidden></p>
           </div>
+        </section>
+      </section>
+
+      <!-- Dashboard Shortcut -->
+      <section class="options-card" aria-labelledby="shortcutHeading">
+        <h2 id="shortcutHeading" class="options-card-title">Dashboard Shortcut</h2>
+        <p class="settings-section-copy">
+          Keyboard shortcuts for Chrome extensions are set on Chrome's own
+          Shortcuts page — this extension can't register or change one
+          itself. This section shows your current shortcut and takes you
+          straight there to set or change it.
+        </p>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Current shortcut</h3>
+          <p class="shortcut-status" id="shortcutStatus" aria-live="polite">Checking…</p>
+          <div class="settings-actions">
+            <button type="button" id="openShortcutSettingsBtn" class="btn btn-ghost">Open Chrome Shortcut Settings</button>
+            <button type="button" id="refreshShortcutBtn" class="btn btn-ghost">Refresh</button>
+          </div>
+          <p class="field-hint">
+            On that page, find "Shortcut Dashboard" and set a key for
+            "Open Shortcut Dashboard" — Chrome supports combinations like
+            Ctrl+D, Ctrl+Shift+D, Ctrl+Alt+D, or Alt+D. If Chrome shows
+            your chosen combination as unavailable, it's already used by
+            Chrome itself or another extension — pick a different one on
+            that page.
+          </p>
         </section>
       </section>
 

@@ -1,11 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Shortcut Dashboard",
-  "version": "3.0.0",
-  "description": "A fast, keyboard-friendly New Tab dashboard for your shortcuts — categories, favorites, search, and drag-and-drop reordering.",
-  "chrome_url_overrides": {
-    "newtab": "newtab.html"
-  },
+  "version": "3.0.9",
+  "description": "A keyboard-friendly shortcuts dashboard — categories, favorites, search, drag-and-drop. Opens on your shortcut, not every New Tab.",
   "permissions": ["storage"],
   "options_page": "options/options.html",
   "background": {

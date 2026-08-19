@@ -429,84 +429,99 @@ body.bg-custom-image::after {
 }
 
 /* ==========================================================================
-   V2.2 — Grid size (Settings > Appearance). Card/icon/type scale with the
-   column width so density actually changes, not just spacing.
+   V3.0 Task 7 — Appearance: Card Size, Icon Size, Grid Density, Grid
+   Layout (Settings > Appearance). Each is independent — changing one
+   never affects the others. All four are column-width/spacing/size
+   *preferences* applied via CSS custom properties on .shortcut-grid, so
+   the grid's existing auto-fill responsive behavior (more columns on
+   wide screens, fewer on narrow ones, never overflowing) is unaffected;
+   they only change what "one column" measures.
+
+   Medium / Comfortable / Standard are the unmodified base values below
+   (.card-open, .card-icon-wrap, etc.) — only Small/Large and
+   Compact/Spacious and More/Fewer need explicit overrides here.
    ========================================================================== */
-.shortcut-grid.grid-small {
-  --grid-col-min: 132px;
+
+/* Grid Layout — column-width preference. */
+.shortcut-grid[data-columns="more"] {
+  --grid-col-min: 150px;
+}
+
+.shortcut-grid[data-columns="fewer"] {
+  --grid-col-min: 260px;
+}
+
+/* Grid Density — spacing between cards. */
+.shortcut-grid[data-density="compact"] {
   --grid-gap: 10px;
 }
 
-.shortcut-grid.grid-medium {
-  --grid-col-min: 190px;
-  --grid-gap: 16px;
+.shortcut-grid[data-density="spacious"] {
+  --grid-gap: 24px;
 }
 
-.shortcut-grid.grid-large {
-  --grid-col-min: 240px;
-  --grid-gap: 22px;
-}
-
-.shortcut-grid.grid-small .card-open {
+/* Card Size — card padding and text sizes. */
+.shortcut-grid[data-card-size="small"] .card-open {
   padding: 13px 12px 12px;
 }
 
-.shortcut-grid.grid-small .card-icon-wrap {
+.shortcut-grid[data-card-size="small"] .card-name {
+  font-size: 13px;
+}
+
+.shortcut-grid[data-card-size="small"] .card-domain {
+  font-size: 10.5px;
+}
+
+.shortcut-grid[data-card-size="large"] .card-open {
+  padding: 22px 20px 20px;
+}
+
+.shortcut-grid[data-card-size="large"] .card-name {
+  font-size: 16.5px;
+}
+
+.shortcut-grid[data-card-size="large"] .card-domain {
+  font-size: 12.5px;
+}
+
+/* Icon Size — icon box and inner glyph sizes. */
+.shortcut-grid[data-icon-size="small"] .card-icon-wrap {
   width: 34px;
   height: 34px;
   margin: 4px 0 10px;
 }
 
-.shortcut-grid.grid-small .card-icon-wrap img {
+.shortcut-grid[data-icon-size="small"] .card-icon-wrap img {
   width: 19px;
   height: 19px;
 }
 
-.shortcut-grid.grid-small .card-icon-fallback {
+.shortcut-grid[data-icon-size="small"] .card-icon-fallback {
   font-size: 13px;
 }
 
-.shortcut-grid.grid-small .card-icon-emoji {
+.shortcut-grid[data-icon-size="small"] .card-icon-wrap .card-icon-emoji {
   font-size: 15px;
 }
 
-.shortcut-grid.grid-small .card-name {
-  font-size: 13px;
-}
-
-.shortcut-grid.grid-small .card-domain {
-  font-size: 10.5px;
-}
-
-.shortcut-grid.grid-large .card-open {
-  padding: 22px 20px 20px;
-}
-
-.shortcut-grid.grid-large .card-icon-wrap {
+.shortcut-grid[data-icon-size="large"] .card-icon-wrap {
   width: 52px;
   height: 52px;
   margin: 8px 0 16px;
 }
 
-.shortcut-grid.grid-large .card-icon-wrap img {
+.shortcut-grid[data-icon-size="large"] .card-icon-wrap img {
   width: 28px;
   height: 28px;
 }
 
-.shortcut-grid.grid-large .card-icon-fallback {
+.shortcut-grid[data-icon-size="large"] .card-icon-fallback {
   font-size: 19px;
 }
 
-.shortcut-grid.grid-large .card-icon-emoji {
+.shortcut-grid[data-icon-size="large"] .card-icon-wrap .card-icon-emoji {
   font-size: 24px;
-}
-
-.shortcut-grid.grid-large .card-name {
-  font-size: 16.5px;
-}
-
-.shortcut-grid.grid-large .card-domain {
-  font-size: 12.5px;
 }
 
 .shortcut-card {
@@ -965,20 +980,22 @@ body.hide-domain .card-domain {
     gap: var(--grid-gap-mobile, 12px);
   }
 
-  /* Mobile floors, independent of the desktop size chosen, so every grid
-     size stays usable (and never forces horizontal scrolling) on a phone. */
-  .shortcut-grid.grid-small {
+  /* Mobile floors, independent of the desktop preference chosen, so
+     every combination stays usable (and never forces horizontal
+     scrolling) on a phone. */
+  .shortcut-grid[data-columns="more"] {
     --grid-col-min-mobile: 108px;
+  }
+
+  .shortcut-grid[data-columns="fewer"] {
+    --grid-col-min-mobile: 168px;
+  }
+
+  .shortcut-grid[data-density="compact"] {
     --grid-gap-mobile: 8px;
   }
 
-  .shortcut-grid.grid-medium {
-    --grid-col-min-mobile: 140px;
-    --grid-gap-mobile: 12px;
-  }
-
-  .shortcut-grid.grid-large {
-    --grid-col-min-mobile: 168px;
+  .shortcut-grid[data-density="spacious"] {
     --grid-gap-mobile: 14px;
   }
 }

@@ -2,7 +2,7 @@
    Shortcut Dashboard — popup.js
 
    The popup is its own top-level document/context, separate from
-   newtab.html — it can't reach into app.js's closures directly, so it
+   dashboard.html — it can't reach into app.js's closures directly, so it
    reads the same chrome.storage.local key (STORAGE_KEY, shared with
    app.js) directly. That IS the storage abstraction Task 2 built: this
    file talks to nothing but chrome.storage.local, never touches
@@ -198,7 +198,7 @@
   }
 
   function init() {
-    openDashboardBtn.addEventListener("click", () => openExtensionPage("newtab.html"));
+    openDashboardBtn.addEventListener("click", () => openExtensionPage("dashboard.html"));
     // V3.0 Task 4 — a dedicated Options page now exists; Settings opens it
     // directly instead of the dashboard's Settings modal.
     settingsBtn.addEventListener("click", () => openExtensionPage("options/options.html"));

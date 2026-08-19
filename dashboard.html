@@ -513,6 +513,20 @@
       <!-- Keyboard shortcuts -->
       <section id="panelKeyboard" class="settings-panel" role="tabpanel" aria-labelledby="tabKeyboard" tabindex="0" hidden>
         <section class="settings-section">
+          <h3 class="settings-section-title">Dashboard shortcut</h3>
+          <p class="settings-section-copy">
+            Keyboard shortcuts for Chrome extensions are set on Chrome's
+            own Shortcuts page — this extension can't register or change
+            one itself.
+          </p>
+          <p class="shortcut-status" id="shortcutStatus" aria-live="polite">Checking…</p>
+          <div class="settings-actions">
+            <button type="button" id="openShortcutSettingsBtn" class="btn btn-ghost">Open Chrome Shortcut Settings</button>
+            <button type="button" id="refreshShortcutBtn" class="btn btn-ghost">Refresh</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
           <h3 class="settings-section-title">Keyboard shortcuts</h3>
           <dl class="shortcuts-help">
             <div class="shortcuts-help-row"><dt><kbd>/</kbd></dt><dd>Focus search</dd></div>
